@@ -15,22 +15,41 @@ URL, селекторы), живёт в репозитории сайта; об�
 | `integration-command` | `npm run test:integration --prefix server` | Тесты с mongodb-memory-server / supertest. |
 | `install-command` | `npm ci --prefix server` | Установка зависимостей для трёх джобов. |
 
+Необязательные inputs: `node-version` (по умолчанию `22`), `cache-dependency-path`
+(lock-файлы для кэша npm, по умолчанию `**/package-lock.json`), `timeout-minutes`
+(по умолчанию 10), `runner-labels` (JSON-метки раннера, по умолчанию
+`["ubuntu-latest"]`; для сайта без минут GitHub-hosted — например
+`["self-hosted","rosteria"]`; есть и у `smoke.yml`, и у `deploy-gate.yml`).
+
 Три джоба `lint`, `unit`, `integration` идут параллельно, у каждого
-`timeout-minutes` ≤ 10. Имена проверок в PR: `<имя вызывающего джоба> / lint` и т.д. —
-их и делают обязательными в правилах ветки `develop`.
+`timeout-minutes` ≤ 10. Имена проверок в PR: `<имя вызывающего джоба> / lint` и т.д.
+(при джобе `ci`, как в `examples/caller-workflows/ci.yml`, — `ci / lint`,
+`ci / unit`, `ci / integration`) — их и делают обязательными в правилах ветки `develop`.
 
 ## 2. Smoke после деплоя на stage и гейт прода
 
 - После деплоя `develop` на stage сайт вызывает `smoke.yml` (`target-env: stage`).
-  Тот ставит коммиту статус **`stage-smoke`** (success / failure) и кладёт
-  HTML-отчёт Playwright в артефакт, ссылку — в сводку запуска.
+  Тот ставит коммиту статус **`stage-smoke`**: `pending` в начале, в конце
+  `success` / `failure` (тесты) или `error` (smoke не запустился: установка,
+  неполный конфиг сайта) — и кладёт HTML-отчёт Playwright в артефакт
+  `site-smoke-report-<env>`, ссылку — в сводку запуска.
 - Деплой `main` на прод сначала вызывает `deploy-gate.yml`: он ищет коммит,
   который проверялся на stage (для merge-коммита develop→main — второй
   родитель, иначе сам коммит), и пропускает деплой только при `stage-smoke = success`.
-  Ручной обход — `workflow_dispatch` с непустым `gate-override-reason`
-  (причина пишется в сводку).
+  Поэтому develop вливается в main **merge-коммитом** (не squash/rebase: у
+  нового коммита статуса нет). Ручной обход — `workflow_dispatch` с непустым
+  `gate-override-reason` (причина и автор пишутся в сводку).
 - После деплоя на прод — `smoke.yml` с `target-env: prod`: только тесты с тегом
-  `@prod-safe` (ничего не пишут: страницы, SEO).
+  `@prod-safe` (ничего не пишут: страницы, SEO, фильтр).
+- Права вызывающих джобов: `smoke.yml` — `contents: read, statuses: write`
+  (и для prod: workflow объявляет `statuses: write`, без него вызов не стартует);
+  `deploy-gate.yml` — `contents: read, statuses: read`. Секреты в `smoke.yml`
+  передаются явно: `secrets: inherit` не работает между разными владельцами
+  (`pucha02/rosteria` → `keykey-team/site-ci-kit`).
+
+Теги тестов: `@smoke` — входит в smoke (по умолчанию `grep`), `@prod-safe` —
+не пишет данных, можно на проде. На проде без `@prod-safe` тест не запустится
+даже при другом `grep` (фильтр в конфиге библиотеки + фикстура).
 
 ## 3. Каталог `e2e/` в репозитории сайта
 
@@ -65,10 +84,28 @@ export default {
 };
 ```
 
+Уточнения к полям (библиотека проверяет обязательные до запуска и называет
+незаполненные):
+
+- `keyPages` — обязательны `home`, `category`, `product`, `search`, у каждой
+  `path` и `readySelector`; можно добавить свои. Ждётся первый **видимый**
+  элемент по селектору (адаптивная вёрстка часто держит скрытую копию блока).
+- `categoryFilter` — библиотека сама открывает `categoryPath`, адаптер только
+  ставит фильтр; `expectedUrlParam` ищется в декодированном URL.
+- `testProduct.optionLabel` — необязателен (товар без вариантов).
+- `novaPoshta` — необязательные поля: `areaName` + `areaRef` (нужны, если сайт
+  сначала спрашивает область, как Sana — `getAreas`), `warehouseNumber`,
+  `warehouseTypeRef` (по умолчанию «Поштове відділення»), `settlementRef`.
+  Подменяются методы `getAreas`, `getCities`, `getSettlements`,
+  `searchSettlements`, `getWarehouses`, `getWarehouseTypes`; на другие подмена
+  отвечает `success:false` с названием метода.
+
 Секреты — только из env раннера (никогда в конфиге):
 `E2E_BASIC_AUTH_USER`, `E2E_BASIC_AUTH_PASSWORD` (basic-auth stage),
 `E2E_CUSTOMER_PHONE`, `E2E_CUSTOMER_OTP_CODE` (тестовый покупатель, §4),
 `E2E_ADMIN_LOGIN`, `E2E_ADMIN_PASSWORD` (тестовый админ из сида).
+Нет секрета — тест, которому он нужен, **пропускается** с причиной в отчёте
+(не падает). Basic-auth отправляется только на домен сайта.
 
 ### `site.adapter.mjs` (named exports, все async, первый аргумент — Playwright `page`)
 
@@ -85,8 +122,21 @@ export default {
 | `expectCustomerLoggedIn(page)` / `logoutCustomer(page)` / `expectCustomerLoggedOut(page)` | |
 | `expectCheckoutAutofilled(page)` | В форме заказа предзаполнены имя, телефон, доставка тестового покупателя. |
 | `loginAdmin(page, { login, password })` / `expectAdminPanel(page)` | Вход в админку и видимая панель. |
-| `applyCategoryFilter(page, siteConfig)` | Ставит фильтр на странице категории. |
-| `readListedProductCount(page)` | Сколько товаров в выдаче (для проверки «фильтр вернул товары»). |
+| `applyCategoryFilter(page, siteConfig)` | Ставит фильтр на уже открытой странице категории. |
+| `readListedProductCount(page)` | Сколько товаров в выдаче (для проверки «фильтр вернул товары»; библиотека опрашивает, пока не станет > 0). |
+
+Все функции обязательны: библиотека до запуска проверяет экспорт и называет
+недостающие. Шаг, который сайт пока не умеет, может бросать понятную ошибку
+(шаблон — `examples/site-e2e/site.adapter.mjs`).
+
+Аргументы: `buyer` — `{ firstName, middleName, lastName, fullName,
+phoneInternational (+380…), phoneNational (0…), email (@example.com), orderComment }`;
+`novaPoshta` — объект из `site.config.mjs`; учётные данные — из секретов.
+
+Импортировать в `site.config.mjs` / `site.adapter.mjs` можно только
+`@playwright/test` и встроенные модули Node: их резолвит библиотека
+(в репозитории сайта ставить Playwright не нужно — две копии в одном процессе
+он не допускает).
 
 ## 4. Стенд stage (код сайта, 06639)
 
