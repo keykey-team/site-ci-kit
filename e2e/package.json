@@ -1,0 +1,17 @@
+{
+  "name": "site-ci-kit-e2e",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Спільні smoke/E2E-сценарії сайтів агентства (06640). Дані й селектори сайту — у його репозиторії: e2e/site.config.mjs і e2e/site.adapter.mjs.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "playwright test",
+    "report": "playwright show-report playwright-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0"
+  }
+}
