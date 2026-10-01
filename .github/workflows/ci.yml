@@ -1,0 +1,203 @@
+# Спільний CI сайтів (06638): lint, unit, integration паралельно на кожен push і PR.
+# Підключення в репозиторії сайту — один job:
+#
+#   jobs:
+#     ci:
+#       uses: keykey-team/site-ci-kit/.github/workflows/ci.yml@v1
+#       with: { install-command: ..., lint-command: ..., unit-command: ..., integration-command: ... }
+#
+# Імена перевірок у PR: «ci / lint», «ci / unit», «ci / integration» (ім'я
+# job сайту + ім'я job тут). Саме їх роблять обов'язковими в правилах develop.
+# Повний приклад — examples/caller-workflows/ci.yml, контракт — docs/site-contract.md §1.
+name: Site CI
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: Версия Node.js (та же, что на сервере сайта и локально)
+        type: string
+        default: "22"
+      install-command:
+        description: Установка зависимостей (выполняется в каждом из трёх джобов)
+        type: string
+        required: true
+      lint-command:
+        description: Линтер. База сравнения для «только изменённые файлы» — в env LINT_BASE_REF
+        type: string
+        required: true
+      unit-command:
+        description: Тесты без БД и сети
+        type: string
+        required: true
+      integration-command:
+        description: Тесты с mongodb-memory-server / supertest
+        type: string
+        required: true
+      cache-dependency-path:
+        description: Lock-файлы для кэша npm в setup-node (glob, можно несколько строк)
+        type: string
+        default: "**/package-lock.json"
+      timeout-minutes:
+        description: Предел на каждый джоб; джобы параллельны, так что это и предел всего прогона
+        type: number
+        default: 10
+      runner-labels:
+        description: 'JSON-метки раннера: ["ubuntu-latest"] или ["self-hosted","rosteria"] для сайта без минут GitHub-hosted'
+        type: string
+        default: '["ubuntu-latest"]'
+
+# Код лише читається: жоден крок не пише в репозиторій, статуси чи релізи.
+permissions:
+  contents: read
+
+defaults:
+  run:
+    # Явний bash вмикає pipefail: впалий лінтер у конвеєрі з tee не стане зеленим.
+    shell: bash
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ${{ fromJSON(inputs.runner-labels) }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    env:
+      # Лінту бінарник MongoDB не потрібен: без цього postinstall
+      # mongodb-memory-server качав би ~100 МБ у кожному прогоні.
+      MONGOMS_DISABLE_POSTINSTALL: "1"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Повна історія: lint-command порівнює змінені файли з базовою гілкою.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+          cache-dependency-path: ${{ inputs.cache-dependency-path }}
+
+      # LINT_BASE_REF — з чим порівнювати змінені файли. Проєкт з накопиченим
+      # боргом лінтить лише змінене, інакше lint був би червоним завжди.
+      - name: Resolve lint base ref
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PULL_REQUEST_BASE_BRANCH: ${{ github.base_ref }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+        run: |
+          # Нова гілка або перший push: before = нулі, порівнюємо з попереднім комітом.
+          empty_commit_sha_pattern='^0+$'
+          fallback_base_ref='HEAD~1'
+          case "$EVENT_NAME" in
+            pull_request|pull_request_target)
+              lint_base_ref="origin/$PULL_REQUEST_BASE_BRANCH" ;;
+            merge_group)
+              lint_base_ref="$MERGE_GROUP_BASE_SHA" ;;
+            push)
+              # Після force-push попереднього коміту в історії може не бути.
+              if [[ -n "$PUSH_BEFORE_SHA" && ! "$PUSH_BEFORE_SHA" =~ $empty_commit_sha_pattern ]] \
+                && git cat-file -e "${PUSH_BEFORE_SHA}^{commit}" 2>/dev/null; then
+                lint_base_ref="$PUSH_BEFORE_SHA"
+              else
+                lint_base_ref="$fallback_base_ref"
+              fi ;;
+            *)
+              lint_base_ref="$fallback_base_ref" ;;
+          esac
+          echo "LINT_BASE_REF=$lint_base_ref" >> "$GITHUB_ENV"
+          echo "LINT_BASE_REF=$lint_base_ref"
+
+      - name: Install dependencies
+        run: ${{ inputs.install-command }}
+
+      - name: Lint
+        run: ${{ inputs.lint-command }}
+
+      - name: Summary
+        if: always()
+        env:
+          CHECK_NAME: lint
+          CHECK_COMMAND: ${{ inputs.lint-command }}
+          CHECK_STATUS: ${{ job.status }}
+        run: |
+          printf -- "- **%s** — %s · \`%s\` · база сравнения: \`%s\`\n" \
+            "$CHECK_NAME" "$CHECK_STATUS" "$CHECK_COMMAND" "${LINT_BASE_REF:-не определена}" >> "$GITHUB_STEP_SUMMARY"
+
+  unit:
+    name: unit
+    runs-on: ${{ fromJSON(inputs.runner-labels) }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    env:
+      # Unit-тести не ходять у БД — бінарник MongoDB їм не потрібен.
+      MONGOMS_DISABLE_POSTINSTALL: "1"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+          cache-dependency-path: ${{ inputs.cache-dependency-path }}
+
+      - name: Install dependencies
+        run: ${{ inputs.install-command }}
+
+      - name: Unit tests
+        run: ${{ inputs.unit-command }}
+
+      - name: Summary
+        if: always()
+        env:
+          CHECK_NAME: unit
+          CHECK_COMMAND: ${{ inputs.unit-command }}
+          CHECK_STATUS: ${{ job.status }}
+        run: |
+          printf -- "- **%s** — %s · \`%s\`\n" "$CHECK_NAME" "$CHECK_STATUS" "$CHECK_COMMAND" >> "$GITHUB_STEP_SUMMARY"
+
+  integration:
+    name: integration
+    runs-on: ${{ fromJSON(inputs.runner-labels) }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+          cache-dependency-path: ${{ inputs.cache-dependency-path }}
+
+      # Бінарник MongoDB для mongodb-memory-server (~100 МБ) — з кешу, а не з
+      # fastdl.mongodb.org щоразу: так швидше і не залежить від їхнього CDN.
+      # Каталог задаємо явно, бо типовий у різних версіях пакета різний.
+      - name: Point mongodb-memory-server to cached binaries
+        run: echo "MONGOMS_DOWNLOAD_DIR=$HOME/.cache/mongodb-binaries" >> "$GITHUB_ENV"
+
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/mongodb-binaries
+          # Версію бінарника визначає версія mongodb-memory-server у lock-файлі.
+          key: mongodb-binaries-${{ runner.os }}-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            mongodb-binaries-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: ${{ inputs.install-command }}
+
+      - name: Integration tests
+        run: ${{ inputs.integration-command }}
+
+      - name: Summary
+        if: always()
+        env:
+          CHECK_NAME: integration
+          CHECK_COMMAND: ${{ inputs.integration-command }}
+          CHECK_STATUS: ${{ job.status }}
+        run: |
+          printf -- "- **%s** — %s · \`%s\`\n" "$CHECK_NAME" "$CHECK_STATUS" "$CHECK_COMMAND" >> "$GITHUB_STEP_SUMMARY"

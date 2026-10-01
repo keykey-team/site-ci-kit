@@ -1,0 +1,35 @@
+# Приклад .github/workflows/ci.yml у репозиторії сайту (06638).
+# Перевірки в PR: «ci / lint», «ci / unit», «ci / integration» — їх роблять
+# обов'язковими в правилах гілки develop (README, «Обязательные проверки»).
+name: CI
+
+on:
+  push:
+  pull_request:
+    branches: [develop, main]
+  workflow_dispatch: {}
+
+# Новий push у ту саму гілку/PR скасовує застарілий прогін — у черзі лише актуальний код.
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Ім'я job — перша частина імені перевірки («ci / lint»). Не перейменовуйте
+  # без оновлення правил гілки: старі обов'язкові перевірки чекатимуть вічно.
+  ci:
+    uses: keykey-team/site-ci-kit/.github/workflows/ci.yml@v1
+    with:
+      # Приклад для Sana: сервер і клієнт в окремих каталогах.
+      install-command: npm ci --prefix server --no-audit --no-fund && npm ci --prefix client --no-audit --no-fund --legacy-peer-deps
+      lint-command: npm run lint:changed --prefix server && npm run lint:changed --prefix client
+      unit-command: npm run test:unit --prefix server
+      integration-command: npm run test:integration --prefix server
+      cache-dependency-path: |
+        server/package-lock.json
+        client/package-lock.json
+      # Сайт на self-hosted раннері (немає хвилин GitHub-hosted):
+      # runner-labels: '["self-hosted", "rosteria"]'
