@@ -1,0 +1,132 @@
+# Гейт деплою на прод (06638): код іде на прод лише після зеленого smoke на stage.
+#
+# Який коміт перевірявся на stage: для merge-коміту develop → main це його
+# другий (і подальші) батьки — голова develop, яку деплоїли на stage; для
+# звичайного коміту (fast-forward) — він сам. На цьому коміті має бути статус
+# stage-smoke = success (його ставить smoke.yml після деплою develop).
+#
+# Ручний обхід — непорожній override-reason (у сайті: Run workflow →
+# gate-override-reason). Причина й автор пишуться у зведення запуску.
+# Приклад виклику — examples/caller-workflows/deploy.yml.
+name: Deploy gate
+
+on:
+  workflow_call:
+    inputs:
+      status-context:
+        description: Статус коммита, который ставит smoke.yml на stage
+        type: string
+        default: stage-smoke
+      override-reason:
+        description: Непустая причина — пропустить прод без зелёного stage-smoke (пишется в сводку)
+        type: string
+        default: ""
+      runner-labels:
+        description: 'JSON-метки раннера: ["ubuntu-latest"] или ["self-hosted","rosteria"]'
+        type: string
+        default: '["ubuntu-latest"]'
+
+# contents — прочитати батьків коміту, statuses — прочитати stage-smoke.
+permissions:
+  contents: read
+  statuses: read
+
+jobs:
+  gate:
+    name: stage-smoke gate
+    runs-on: ${{ fromJSON(inputs.runner-labels) }}
+    timeout-minutes: 5
+    steps:
+      - name: Check stage smoke of the tested commit
+        uses: actions/github-script@v9
+        env:
+          STATUS_CONTEXT: ${{ inputs.status-context }}
+          OVERRIDE_REASON: ${{ inputs.override-reason }}
+        with:
+          script: |
+            const statusContext = process.env.STATUS_CONTEXT;
+            const overrideReason = (process.env.OVERRIDE_REASON ?? "").trim();
+            const deploySha = context.sha;
+            // Скільки контекстів статусу читати з коміту: у сайтів їх одиниці.
+            const statusPageSize = 100;
+            const missingState = "missing";
+            const successState = "success";
+            // Короткий SHA, як його показує GitHub в історії комітів.
+            const shortShaLength = 12;
+            const shortenSha = (commitSha) => commitSha.slice(0, shortShaLength);
+
+            const { data: deployCommit } = await github.rest.repos.getCommit({ ...context.repo, ref: deploySha });
+            const isMergeCommit = deployCommit.parents.length > 1;
+            // Перший батько merge-коміту — попередній main, решта — те, що влили.
+            const testedShas = isMergeCommit ? deployCommit.parents.slice(1).map((parentCommit) => parentCommit.sha) : [deploySha];
+
+            const smokeResults = [];
+            for (const testedSha of testedShas) {
+              const { data: combinedStatus } = await github.rest.repos.getCombinedStatusForRef({
+                ...context.repo,
+                ref: testedSha,
+                per_page: statusPageSize,
+              });
+              const smokeStatus = combinedStatus.statuses.find((commitStatus) => commitStatus.context === statusContext);
+              smokeResults.push({
+                testedSha,
+                smokeState: smokeStatus?.state ?? missingState,
+                smokeUrl: smokeStatus?.target_url ?? "",
+                smokeDescription: smokeStatus?.description ?? "",
+              });
+            }
+
+            const isEverySmokeGreen = smokeResults.every((smokeResult) => smokeResult.smokeState === successState);
+            const whatToDoByState = {
+              [missingState]:
+                "этот коммит не проходил smoke на stage. Вливайте в main ветку develop после её деплоя на stage, " +
+                "merge-коммитом (не squash/rebase), либо сначала прогоните этот код через stage.",
+              pending: "smoke на stage ещё идёт — дождитесь его и перезапустите этот деплой (Re-run jobs).",
+              failure: "smoke на stage красный — исправьте в develop, дождитесь зелёного smoke и влейте снова.",
+              error: "smoke на stage не смог запуститься — откройте его запуск, исправьте и перезапустите.",
+            };
+
+            const summaryRows = smokeResults.map((smokeResult) => [
+              shortenSha(smokeResult.testedSha),
+              smokeResult.smokeState,
+              smokeResult.smokeDescription,
+              smokeResult.smokeUrl ? `<a href="${smokeResult.smokeUrl}">запуск smoke</a>` : "—",
+            ]);
+            core.summary
+              .addHeading(`Гейт прода: ${statusContext}`, 3)
+              .addRaw(`Деплоится ${shortenSha(deploySha)}${isMergeCommit ? " (merge-коммит, проверяются влитые родители)" : ""}`, true)
+              .addTable([
+                [
+                  { data: "Проверенный коммит", header: true },
+                  { data: "Статус", header: true },
+                  { data: "Итог smoke", header: true },
+                  { data: "Ссылка", header: true },
+                ],
+                ...summaryRows,
+              ]);
+
+            if (isEverySmokeGreen) {
+              core.summary.addRaw("Гейт пройден: smoke на stage зелёный.", true);
+              await core.summary.write();
+              core.notice(`Гейт пройден: ${statusContext} = success`);
+              return;
+            }
+
+            const failureReasons = smokeResults
+              .filter((smokeResult) => smokeResult.smokeState !== successState)
+              .map((smokeResult) => `${shortenSha(smokeResult.testedSha)}: ${smokeResult.smokeState} — ${whatToDoByState[smokeResult.smokeState] ?? whatToDoByState.error}`);
+
+            if (overrideReason) {
+              const overrideWarning = `ГЕЙТ ОБОЙДЁН ВРУЧНУЮ (${context.actor}): ${overrideReason}. Без зелёного smoke — ${failureReasons.join(" ")}`;
+              core.summary.addRaw(`<strong>${overrideWarning}</strong>`, true);
+              await core.summary.write();
+              core.warning(overrideWarning);
+              return;
+            }
+
+            const blockMessage =
+              `Деплой на прод остановлен. ${failureReasons.join(" ")} ` +
+              "Срочно и осознанно — Run workflow в Deploy с заполненным gate-override-reason.";
+            core.summary.addRaw(blockMessage, true);
+            await core.summary.write();
+            core.setFailed(blockMessage);

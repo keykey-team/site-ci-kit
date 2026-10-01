@@ -1,0 +1,87 @@
+# Приклад .github/workflows/deploy.yml у репозиторії сайту (06638): деплой
+# зі smoke після stage і гейтом перед продом.
+#
+#   push develop → deploy на stage → smoke stage (статус stage-smoke на коміті)
+#   push main    → deploy-gate (stage-smoke того коміту = success?) → deploy
+#                  на прод → smoke prod (лише @prod-safe)
+#
+# Власні job збірки/тестів сайту (build gate тощо) лишаються як були — додайте
+# їх у needs у deploy.
+name: Deploy
+
+on:
+  push:
+    branches: [develop, main]
+  workflow_dispatch:
+    inputs:
+      gate-override-reason:
+        description: "Деплой main без зелёного stage-smoke: причина (пусто — гейт работает)"
+        type: string
+        default: ""
+
+concurrency:
+  group: deploy-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-gate:
+    if: github.ref_name == 'main'
+    uses: keykey-team/site-ci-kit/.github/workflows/deploy-gate.yml@v1
+    permissions:
+      contents: read
+      statuses: read
+    with:
+      # На push inputs порожні — гейт працює; заповнюється лише з Run workflow.
+      override-reason: ${{ inputs.gate-override-reason || '' }}
+
+  deploy:
+    needs: deploy-gate
+    # develop: гейт пропущено (skipped) — деплоїмо; main: лише після успіху гейту.
+    if: >-
+      !cancelled() && (
+        (github.ref_name == 'develop' && needs.deploy-gate.result == 'skipped') ||
+        (github.ref_name == 'main' && needs.deploy-gate.result == 'success')
+      )
+    runs-on: self-hosted
+    timeout-minutes: 40
+    steps:
+      - name: Deploy
+        run: bash scripts/deploy.sh   # деплой сайту як зараз (Sana, Rosteria — свій)
+
+  smoke-stage:
+    needs: deploy
+    if: github.ref_name == 'develop'
+    uses: keykey-team/site-ci-kit/.github/workflows/smoke.yml@v1
+    # statuses: write — smoke ставить коміту статус stage-smoke.
+    permissions:
+      contents: read
+      statuses: write
+    with:
+      target-env: stage
+      kit-ref: v1
+    # secrets: inherit не працює між різними власниками (pucha02 → keykey-team),
+    # тому секрети передаються явно.
+    secrets:
+      E2E_BASIC_AUTH_USER: ${{ secrets.E2E_BASIC_AUTH_USER }}
+      E2E_BASIC_AUTH_PASSWORD: ${{ secrets.E2E_BASIC_AUTH_PASSWORD }}
+      E2E_CUSTOMER_PHONE: ${{ secrets.E2E_CUSTOMER_PHONE }}
+      E2E_CUSTOMER_OTP_CODE: ${{ secrets.E2E_CUSTOMER_OTP_CODE }}
+      E2E_ADMIN_LOGIN: ${{ secrets.E2E_ADMIN_LOGIN }}
+      E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD }}
+
+  smoke-prod:
+    needs: deploy
+    if: github.ref_name == 'main'
+    uses: keykey-team/site-ci-kit/.github/workflows/smoke.yml@v1
+    # smoke.yml оголошує statuses: write (для stage); без цього дозволу тут
+    # GitHub не запустить виклик навіть для проду.
+    permissions:
+      contents: read
+      statuses: write
+    with:
+      target-env: prod
+      kit-ref: v1
+    # Прод відкритий: секрети не потрібні, тести із записом туди не йдуть.

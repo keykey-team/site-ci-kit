@@ -1,0 +1,223 @@
+# Smoke/E2E сайту після деплою (06638 + 06640). Бере сценарії з цього репозиторію
+# (e2e/), а дані й селектори — з репозиторію сайту (<site-e2e-dir>/site.config.mjs
+# + site.adapter.mjs, docs/site-contract.md §3).
+#
+#   target-env: stage — усі тести з тегом grep; коміту ставиться статус
+#                       stage-smoke (success/failure), по ньому deploy-gate.yml
+#                       пускає або не пускає цей код на прод.
+#   target-env: prod  — лише тести з @prod-safe (нічого не пишуть). Статус не
+#                       ставиться: прод уже задеплоєно, червоний smoke — це алерт.
+#
+# HTML-звіт Playwright — артефакт запуску, посилання на нього — у зведенні.
+# Приклад виклику — examples/caller-workflows/deploy.yml.
+name: Site smoke
+
+on:
+  workflow_call:
+    inputs:
+      target-env:
+        description: "Окружение: stage или prod"
+        type: string
+        required: true
+      site-e2e-dir:
+        description: Каталог с site.config.mjs и site.adapter.mjs в репозитории сайта
+        type: string
+        default: e2e
+      kit-ref:
+        description: Версия site-ci-kit для сценариев; держите равной @-версии в uses
+        type: string
+        default: v1
+      grep:
+        description: Тег (регулярное выражение) отбора тестов; на prod дополнительно только @prod-safe
+        type: string
+        default: "@smoke"
+      status-context:
+        description: Имя статуса коммита, который ставит smoke на stage и проверяет deploy-gate
+        type: string
+        default: stage-smoke
+      runner-labels:
+        description: 'JSON-метки раннера: ["ubuntu-latest"] или ["self-hosted","rosteria"]'
+        type: string
+        default: '["ubuntu-latest"]'
+    secrets:
+      E2E_BASIC_AUTH_USER:
+        description: Basic-auth stage
+        required: false
+      E2E_BASIC_AUTH_PASSWORD:
+        description: Basic-auth stage
+        required: false
+      E2E_CUSTOMER_PHONE:
+        description: Телефон тестового покупателя из сида stage
+        required: false
+      E2E_CUSTOMER_OTP_CODE:
+        description: Код входа тестового покупателя (работает только на stage)
+        required: false
+      E2E_ADMIN_LOGIN:
+        description: Логин тестового админа из сида stage
+        required: false
+      E2E_ADMIN_PASSWORD:
+        description: Пароль тестового админа из сида stage
+        required: false
+
+# statuses: write — лише для статусу stage-smoke на коміті; код тільки читається.
+permissions:
+  contents: read
+  statuses: write
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  KIT_REPOSITORY: keykey-team/site-ci-kit
+  # Куди кладеться site-ci-kit поруч із кодом сайту.
+  KIT_CHECKOUT_PATH: .site-ci-kit
+  REPORT_ARTIFACT_NAME: site-smoke-report-${{ inputs.target-env }}
+  # Звіт потрібен, поки розбираються з падінням; 14 днів покривають відпустку
+  # чергового і не роздувають сховище артефактів.
+  REPORT_RETENTION_DAYS: 14
+  SMOKE_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+jobs:
+  smoke:
+    name: smoke (${{ inputs.target-env }})
+    runs-on: ${{ fromJSON(inputs.runner-labels) }}
+    # Встановлення браузера ~2 хв + набір ~3 хв; 15 — запас на холодний stage
+    # і один повтор упалих тестів.
+    timeout-minutes: 15
+    steps:
+      - name: Validate target env
+        env:
+          TARGET_ENV: ${{ inputs.target-env }}
+        run: |
+          case "$TARGET_ENV" in
+            stage|prod) ;;
+            *) echo "::error::target-env=\"$TARGET_ENV\": допустимо stage или prod"; exit 1 ;;
+          esac
+
+      # pending одразу: deploy-gate, запущений поки smoke ще йде, побачить
+      # «ще не закінчено», а не «не перевірялось».
+      - name: Mark stage smoke as pending
+        if: inputs.target-env == 'stage'
+        uses: actions/github-script@v9
+        env:
+          STATUS_CONTEXT: ${{ inputs.status-context }}
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              ...context.repo,
+              sha: context.sha,
+              state: "pending",
+              context: process.env.STATUS_CONTEXT,
+              target_url: process.env.SMOKE_RUN_URL,
+              description: "smoke на stage идёт",
+            });
+
+      - name: Checkout site
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Checkout site-ci-kit
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.KIT_REPOSITORY }}
+          ref: ${{ inputs.kit-ref }}
+          path: ${{ env.KIT_CHECKOUT_PATH }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          # Версія бібліотеки, а не сайту: e2e/package.json вимагає Node 22.
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ${{ env.KIT_CHECKOUT_PATH }}/e2e/package-lock.json
+
+      - name: Install site-ci-kit e2e dependencies
+        working-directory: ${{ env.KIT_CHECKOUT_PATH }}/e2e
+        run: npm ci --no-audit --no-fund
+
+      - name: Read Playwright version
+        id: playwright-version
+        working-directory: ${{ env.KIT_CHECKOUT_PATH }}/e2e
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      # Браузер прив'язаний до версії Playwright: нова версія — новий ключ кешу.
+      - name: Cache Playwright browsers
+        id: playwright-browsers-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-browsers-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}-chromium
+
+      - name: Install Chromium
+        if: steps.playwright-browsers-cache.outputs.cache-hit != 'true'
+        working-directory: ${{ env.KIT_CHECKOUT_PATH }}/e2e
+        run: npx playwright install --with-deps chromium
+
+      # Браузер із кешу, але системні бібліотеки раннера щоразу чисті.
+      - name: Install Chromium system dependencies
+        if: steps.playwright-browsers-cache.outputs.cache-hit == 'true'
+        working-directory: ${{ env.KIT_CHECKOUT_PATH }}/e2e
+        run: npx playwright install-deps chromium
+
+      - name: Run smoke tests
+        id: run-tests
+        working-directory: ${{ env.KIT_CHECKOUT_PATH }}/e2e
+        env:
+          SITE_E2E_DIR: ${{ github.workspace }}/${{ inputs.site-e2e-dir }}
+          E2E_TARGET_ENV: ${{ inputs.target-env }}
+          E2E_GREP: ${{ inputs.grep }}
+          E2E_BASIC_AUTH_USER: ${{ secrets.E2E_BASIC_AUTH_USER }}
+          E2E_BASIC_AUTH_PASSWORD: ${{ secrets.E2E_BASIC_AUTH_PASSWORD }}
+          E2E_CUSTOMER_PHONE: ${{ secrets.E2E_CUSTOMER_PHONE }}
+          E2E_CUSTOMER_OTP_CODE: ${{ secrets.E2E_CUSTOMER_OTP_CODE }}
+          E2E_ADMIN_LOGIN: ${{ secrets.E2E_ADMIN_LOGIN }}
+          E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD }}
+        run: npx playwright test
+
+      - name: Upload Playwright report
+        id: upload-report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.REPORT_ARTIFACT_NAME }}
+          path: ${{ env.KIT_CHECKOUT_PATH }}/e2e/playwright-report
+          retention-days: ${{ env.REPORT_RETENTION_DAYS }}
+          if-no-files-found: warn
+          # Повторний запуск (Re-run jobs) у тому ж run замінює звіт попередньої спроби.
+          overwrite: true
+
+      - name: Write run summary
+        id: summary
+        if: always()
+        working-directory: ${{ env.KIT_CHECKOUT_PATH }}/e2e
+        env:
+          E2E_TARGET_ENV: ${{ inputs.target-env }}
+          SMOKE_REPORT_ARTIFACT_NAME: ${{ env.REPORT_ARTIFACT_NAME }}
+          SMOKE_REPORT_ARTIFACT_URL: ${{ steps.upload-report.outputs.artifact-url }}
+          SMOKE_TEST_STEP_OUTCOME: ${{ steps.run-tests.outcome }}
+        run: node scripts/writeRunSummary.mjs
+
+      # Фінальний статус stage-smoke. success — лише якщо тести пройшли; впалий
+      # крок до тестів (встановлення, конфіг сайту) — error: гейт не пустить і тоді.
+      - name: Set stage smoke commit status
+        if: always() && inputs.target-env == 'stage'
+        uses: actions/github-script@v9
+        env:
+          STATUS_CONTEXT: ${{ inputs.status-context }}
+          TESTS_OUTCOME: ${{ steps.run-tests.outcome }}
+          STATUS_DESCRIPTION: ${{ steps.summary.outputs.status-description }}
+        with:
+          script: |
+            const commitStatusByTestsOutcome = { success: "success", failure: "failure" };
+            const commitState = commitStatusByTestsOutcome[process.env.TESTS_OUTCOME] ?? "error";
+            await github.rest.repos.createCommitStatus({
+              ...context.repo,
+              sha: context.sha,
+              state: commitState,
+              context: process.env.STATUS_CONTEXT,
+              target_url: process.env.SMOKE_RUN_URL,
+              description: process.env.STATUS_DESCRIPTION || "smoke не запустился — см. лог",
+            });
+            core.info(`${process.env.STATUS_CONTEXT} = ${commitState} на ${context.sha}`);
