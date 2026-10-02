@@ -3,7 +3,7 @@
 #
 #   jobs:
 #     ci:
-#       uses: keykey-team/site-ci-kit/.github/workflows/ci.yml@v1
+#       uses: keykey-team/site-ci-kit/.github/workflows/ci.yml@v2
 #       with: { install-command: ..., lint-command: ..., unit-command: ..., integration-command: ... }
 #
 # Імена перевірок у PR: «ci / lint», «ci / unit», «ci / integration» (ім'я

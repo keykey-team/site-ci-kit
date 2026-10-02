@@ -29,7 +29,7 @@ permissions:
 jobs:
   deploy-gate:
     if: github.ref_name == 'main'
-    uses: keykey-team/site-ci-kit/.github/workflows/deploy-gate.yml@v1
+    uses: keykey-team/site-ci-kit/.github/workflows/deploy-gate.yml@v2
     permissions:
       contents: read
       statuses: read
@@ -54,14 +54,14 @@ jobs:
   smoke-stage:
     needs: deploy
     if: github.ref_name == 'develop'
-    uses: keykey-team/site-ci-kit/.github/workflows/smoke.yml@v1
+    uses: keykey-team/site-ci-kit/.github/workflows/smoke.yml@v2
     # statuses: write — smoke ставить коміту статус stage-smoke.
     permissions:
       contents: read
       statuses: write
     with:
       target-env: stage
-      kit-ref: v1
+      kit-ref: v2
     # secrets: inherit не працює між різними власниками (pucha02 → keykey-team),
     # тому секрети передаються явно.
     secrets:
@@ -71,11 +71,13 @@ jobs:
       E2E_CUSTOMER_OTP_CODE: ${{ secrets.E2E_CUSTOMER_OTP_CODE }}
       E2E_ADMIN_LOGIN: ${{ secrets.E2E_ADMIN_LOGIN }}
       E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD }}
+      # TEST_ORDER_TOKEN сервера stage: тестове замовлення й читання замовлення/залишку (06641).
+      E2E_TEST_ORDER_TOKEN: ${{ secrets.E2E_STAGE_TEST_ORDER_TOKEN }}
 
   smoke-prod:
     needs: deploy
     if: github.ref_name == 'main'
-    uses: keykey-team/site-ci-kit/.github/workflows/smoke.yml@v1
+    uses: keykey-team/site-ci-kit/.github/workflows/smoke.yml@v2
     # smoke.yml оголошує statuses: write (для stage); без цього дозволу тут
     # GitHub не запустить виклик навіть для проду.
     permissions:
@@ -83,5 +85,8 @@ jobs:
       statuses: write
     with:
       target-env: prod
-      kit-ref: v1
-    # Прод відкритий: секрети не потрібні, тести із записом туди не йдуть.
+      kit-ref: v2
+    # Прод відкритий, тести із записом туди не йдуть — крім тестового
+    # замовлення (06641), якому потрібен TEST_ORDER_TOKEN сервера проду.
+    secrets:
+      E2E_TEST_ORDER_TOKEN: ${{ secrets.E2E_PROD_TEST_ORDER_TOKEN }}
