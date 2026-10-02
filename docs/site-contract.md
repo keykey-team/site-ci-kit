@@ -1,4 +1,4 @@
-# Контракт сайта для site-ci-kit (06638 / 06639 / 06640)
+# Контракт сайта для site-ci-kit (06638 / 06639 / 06640 / 06641)
 
 Что репозиторий сайта обязан иметь, чтобы подключить общий CI, гейт деплоя и
 библиотеку smoke/E2E-тестов. Всё, что отличается между сайтами (команды,
@@ -40,7 +40,9 @@ URL, селекторы), живёт в репозитории сайта; об�
   нового коммита статуса нет). Ручной обход — `workflow_dispatch` с непустым
   `gate-override-reason` (причина и автор пишутся в сводку).
 - После деплоя на прод — `smoke.yml` с `target-env: prod`: только тесты с тегом
-  `@prod-safe` (ничего не пишут: страницы, SEO, фильтр).
+  `@prod-safe` (ничего не пишут: страницы, SEO, фильтр) и тестовый заказ
+  `@test-order` (§5: сайт помечает его `isTest`, склад и статистика не меняются,
+  в CRM он сразу отменяется).
 - Права вызывающих джобов: `smoke.yml` — `contents: read, statuses: write`
   (и для prod: workflow объявляет `statuses: write`, без него вызов не стартует);
   `deploy-gate.yml` — `contents: read, statuses: read`. Секреты в `smoke.yml`
@@ -48,8 +50,9 @@ URL, селекторы), живёт в репозитории сайта; об�
   (`pucha02/rosteria` → `keykey-team/site-ci-kit`).
 
 Теги тестов: `@smoke` — входит в smoke (по умолчанию `grep`), `@prod-safe` —
-не пишет данных, можно на проде. На проде без `@prod-safe` тест не запустится
-даже при другом `grep` (фильтр в конфиге библиотеки + фикстура).
+не пишет данных, можно на проде, `@test-order` — пишет только тестовый заказ
+(§5), тоже можно на проде. На проде без одного из этих двух тегов тест не
+запустится даже при другом `grep` (фильтр в конфиге библиотеки + фикстура).
 
 ## 3. Каталог `e2e/` в репозитории сайта
 
@@ -81,6 +84,20 @@ export default {
   novaPoshta: { cityName: "Київ", cityRef: "...", warehouseName: "...", warehouseRef: "..." },
   // Требования к SEO на проде.
   seo: { sitemapPath: "/sitemap.xml", robotsPath: "/robots.txt", indexedPaths: ["/", "/catalog/all"] },
+  // API сайта для проверок без браузера (§5); {orderNumber} и {sku} подставляет библиотека.
+  api: {
+    customerProfilePath: "/api/iam/auth/me",
+    testOrderReadPath: "/api/iam/e2e/orders/{orderNumber}",
+    stockReadPath: "/api/catalog/e2e/stock/{sku}",
+  },
+  // Тестовый заказ на проде (§5): настоящий товар в наличии; на stage берётся testProduct.
+  testOrder: {
+    createOrderUrlPattern: "**/api/iam/guest-checkout",
+    product: { path: "/product/...", optionLabel: null },
+    blockedRequestPatterns: [], // необязательно: свои счётчики аналитики сверх типовых
+  },
+  // Необязательно: известный шум консоли (regex-строки), который сайт пока не исправил.
+  consoleErrorIgnorePatterns: [],
 };
 ```
 
@@ -92,7 +109,13 @@ export default {
   элемент по селектору (адаптивная вёрстка часто держит скрытую копию блока).
 - `categoryFilter` — библиотека сама открывает `categoryPath`, адаптер только
   ставит фильтр; `expectedUrlParam` ищется в декодированном URL.
-- `testProduct.optionLabel` — необязателен (товар без вариантов).
+- `testProduct.optionLabel` — необязателен (товар без вариантов); `null` у
+  `testOrder.product.optionLabel` — адаптер берёт первый доступный вариант
+  (размеры на проде раскупают).
+- Консоль браузера на `keyPages` должна быть чистой: считаются необработанные
+  исключения страницы и `console.error` скриптов самого сайта; ошибки сторонних
+  скриптов (пиксели, виджеты) не считаются. `consoleErrorIgnorePatterns` — только
+  для известного шума с задачей на исправление.
 - `novaPoshta` — необязательные поля: `areaName` + `areaRef` (нужны, если сайт
   сначала спрашивает область, как Sana — `getAreas`), `warehouseNumber`,
   `warehouseTypeRef` (по умолчанию «Поштове відділення»), `settlementRef`.
@@ -103,7 +126,8 @@ export default {
 Секреты — только из env раннера (никогда в конфиге):
 `E2E_BASIC_AUTH_USER`, `E2E_BASIC_AUTH_PASSWORD` (basic-auth stage),
 `E2E_CUSTOMER_PHONE`, `E2E_CUSTOMER_OTP_CODE` (тестовый покупатель, §4),
-`E2E_ADMIN_LOGIN`, `E2E_ADMIN_PASSWORD` (тестовый админ из сида).
+`E2E_ADMIN_LOGIN`, `E2E_ADMIN_PASSWORD` (тестовый админ из сида),
+`E2E_TEST_ORDER_TOKEN` (`TEST_ORDER_TOKEN` сервера этого окружения, §5).
 Нет секрета — тест, которому он нужен, **пропускается** с причиной в отчёте
 (не падает). Basic-auth отправляется только на домен сайта.
 
@@ -111,17 +135,22 @@ export default {
 
 | Функция | Что делает на сайте |
 |---|---|
-| `addTestProductToCart(page, siteConfig)` | Открывает `testProduct`, выбирает опцию, кладёт в корзину. |
+| `addTestProductToCart(page, siteConfig)` | Открывает `testProduct`, выбирает опцию (`null` — первую доступную), кладёт в корзину. **Возвращает** `{ unitPrice, sku }`: цену выбранного варианта с карточки (число, грн) и SKU варианта в корзине. |
+| `readCartTotal(page)` | Сумма товаров в корзине / на оформлении без доставки (число, грн). |
 | `openCheckout(page)` | Открывает форму заказа с корзиной. |
 | `fillGuestBuyer(page, buyer)` | ФИО, телефон, email гостя (`buyer` — фейковые данные из библиотеки). |
 | `chooseNovaPoshtaBranch(page, novaPoshta)` | Выбирает город и отделение НП. |
 | `chooseOfflinePayment(page)` | Способ оплаты без перехода в банк (Sana — `iban`, Rosteria — `cash`). |
 | `submitOrder(page)` | Отправляет форму. |
 | `expectOrderPlaced(page)` | Проверяет страницу «спасибо» / подтверждение. |
+| `readPlacedOrderNumber(page)` | Номер только что оформленного заказа (строка). |
+| `expectOrderInCustomerAccount(page, orderNumber)` | Открывает историю заказов в кабинете, заказ там есть. |
+| `readCustomerSessionToken(page)` | Bearer-токен вошедшего покупателя (обычно кука) — библиотека проверяет, что после выхода API его отклоняет. |
 | `loginCustomer(page, { phone, otpCode })` | Вход по телефону и коду. |
 | `expectCustomerLoggedIn(page)` / `logoutCustomer(page)` / `expectCustomerLoggedOut(page)` | |
 | `expectCheckoutAutofilled(page)` | В форме заказа предзаполнены имя, телефон, доставка тестового покупателя. |
 | `loginAdmin(page, { login, password })` / `expectAdminPanel(page)` | Вход в админку и видимая панель. |
+| `expectAdminOrdersList(page)` | (Админ уже вошёл) открывает список заказов, он загрузился без ошибки. |
 | `applyCategoryFilter(page, siteConfig)` | Ставит фильтр на уже открытой странице категории. |
 | `readListedProductCount(page)` | Сколько товаров в выдаче (для проверки «фильтр вернул товары»; библиотека опрашивает, пока не станет > 0). |
 
@@ -154,3 +183,47 @@ phoneInternational (+380…), phoneNational (0…), email (@example.com), orderC
 - состав: вариации цвет × размер (или аналог сайта), остаток 0 и 1, архивный
   товар (все варианты недоступны), цена 0, скрытый товар, промокоды всех типов
   сайта (если есть), тестовый покупатель с адресом доставки, тестовый админ.
+
+## 5. Тестовый заказ и API для проверок (код сайта, 06641)
+
+Сервер сайта (прод и stage) принимает **тестовый заказ** и отдаёт данные для
+проверок smoke. Всё закрыто одним секретом окружения `TEST_ORDER_TOKEN`
+(случайная строка ≥ 32 символов, у прода и stage — разные); в CI он приходит
+как `E2E_TEST_ORDER_TOKEN` (секреты репозитория `E2E_STAGE_TEST_ORDER_TOKEN`,
+`E2E_PROD_TEST_ORDER_TOKEN`).
+
+**Оформление с заголовком `X-Test-Order-Token`** (библиотека добавляет его
+только к запросу `testOrder.createOrderUrlPattern`):
+
+- нет заголовка — обычный заказ, поведение не меняется;
+- заголовок есть, но не совпадает (сравнение `timingSafeEqual`) или
+  `TEST_ORDER_TOKEN` на сервере не задан — **403**, ничего не создаётся и не
+  резервируется: тест не может превратиться в настоящий заказ;
+- совпал — заказ сохраняется с `isTest: true` (флаг только из заголовка, не из
+  тела), только с оплатой без банка. Тестовый заказ:
+  - не резервирует и не списывает остаток, не пишет журнал движения склада;
+  - не списывает и не начисляет бонусы/кешбэк/реферальные, не трогает промокоды;
+  - не попадает в бизнес-метрики (`shop_orders_*`), аналитику продаж, карточки
+    клиентов; не привязывается к покупателю по телефону;
+  - не шлёт Telegram и CAPI (Meta/TikTok); страница «спасибо» не шлёт purchase;
+  - в CRM (если `ORDER_DISPATCH_ENABLED` не выключен) уходит **без товарных
+    позиций** (склад и резерв CRM не двигаются), с пометкой «🧪 ТЕСТОВЕ
+    ЗАМОВЛЕННЯ» в комментариях, клиентом «ТЕСТ Автоперевірка» и кастомным полем
+    `test_order` (его заводят в CRM заранее); товар и SKU — текстом в комментарии;
+  - сразу после создания отменяется в CRM (`PUT /orders/{id}/status`) и на сайте;
+    сбой отмены — алерт через обычный канал сбоев интеграций;
+  - виден в админском списке заказов с пометкой «ТЕСТ».
+
+**Чтение для проверок** (тот же заголовок; нет `TEST_ORDER_TOKEN` — 404,
+не совпал — 403; без персональных данных):
+
+- `GET api.testOrderReadPath` →
+  `{ orderNumber, isTest, isCancelled, itemsTotalAmount, items: [{ sku, quantity, unitPrice }], crm: { orderId, isCancelled } }`.
+  На проде отдаются только тестовые заказы (остальные — 404), на stage — любые
+  (smoke stage сверяет и обычный заказ гостя).
+- `GET api.stockReadPath` → `{ sku, quantity }` — текущий остаток варианта на сайте.
+
+**Выход покупателя отзывает токен на сервере**: после выхода
+`GET api.customerProfilePath` со старым Bearer-токеном — 401/403 (smoke это
+проверяет). Хранить отозванные токены достаточно до их естественного истечения
+(TTL-индекс).

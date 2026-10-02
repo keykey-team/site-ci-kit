@@ -44,6 +44,32 @@ export default {
     optionLabel: "42",
   },
 
+  // API сайту для перевірок без браузера (06641, docs/site-contract.md §5).
+  // Шляхи — відносно baseUrls; {orderNumber} і {sku} підставляє бібліотека.
+  api: {
+    // TODO: захищений GET покупця: 200 з живим Bearer-токеном, 401 після виходу.
+    customerProfilePath: "/api/auth/me",
+    // TODO: читання замовлення за X-Test-Order-Token (без персональних даних).
+    testOrderReadPath: "/api/orders/e2e/{orderNumber}",
+    // TODO: поточний залишок варіанта за SKU (за тим самим заголовком).
+    stockReadPath: "/api/catalog/e2e/stock/{sku}",
+  },
+
+  // Тестове замовлення на проді (06641): справжній товар, що є в наявності на
+  // проді. На stage тест бере testProduct із сиду.
+  testOrder: {
+    // TODO: glob запиту оформлення — лише до нього бібліотека додає X-Test-Order-Token.
+    createOrderUrlPattern: "**/api/orders/create-order",
+    // TODO: товар, який рідко закінчується; optionLabel: null — перший доступний варіант.
+    product: { path: "/product/some-real-product", optionLabel: null },
+    // Необов'язково: свої лічильники аналітики, крім типових (GA, Pixel, TikTok, /api/metrics/event).
+    blockedRequestPatterns: [],
+  },
+
+  // Відомий шум у консолі, який сайт поки не виправив (regex-рядки). Помилки
+  // сторонніх скриптів (пікселі, віджети) бібліотека й так не рахує.
+  consoleErrorIgnorePatterns: [],
+
   // Нова пошта: справжні Ref (сервер сайту їх перевіряє), відповіді API НП у
   // браузері підміняються з цих даних — smoke не залежить від доступності НП.
   // Ref беруться з API НП: getCities (cityRef), getWarehouses (warehouseRef),

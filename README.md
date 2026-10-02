@@ -1,7 +1,7 @@
 # site-ci-kit
 
 Общий CI, гейт деплоя и библиотека smoke/E2E-тестов для сайтов агентства
-(задачи 06638 и 06640). Сайт подключается ссылкой на reusable workflow и двумя
+(задачи 06638, 06640 и 06641). Сайт подключается ссылкой на reusable workflow и двумя
 файлами в своём репозитории — общий код живёт здесь.
 
 Репозиторий **публичный**: здесь нет секретов, адресов админок и данных сайтов.
@@ -87,7 +87,7 @@ integration кэшируются (`~/.cache/mongodb-binaries`), в lint и unit 
 владельцами, например `pucha02/rosteria` → `keykey-team/site-ci-kit`).
 
 Inputs `smoke.yml`: `target-env` (обязателен), `site-e2e-dir` (`e2e`),
-`kit-ref` (`v1` — держите равным версии в `uses: ...@v1`), `grep` (`@smoke`),
+`kit-ref` (`v2` — держите равным версии в `uses: ...@v2`), `grep` (`@smoke`),
 `status-context` (`stage-smoke`), `runner-labels`.
 Inputs `deploy-gate.yml`: `status-context` (`stage-smoke`), `override-reason` (`""`),
 `runner-labels`.
@@ -102,9 +102,10 @@ Inputs `deploy-gate.yml`: `status-context` (`stage-smoke`), `override-reason` (`
 | `E2E_BASIC_AUTH_USER`, `E2E_BASIC_AUTH_PASSWORD` | basic-auth stage | stage ответит 401 — smoke красный |
 | `E2E_CUSTOMER_PHONE`, `E2E_CUSTOMER_OTP_CODE` | тестовый покупатель из сида stage (вход по коду без SMS) | вход/выход и заказ с автозаполнением **пропускаются** |
 | `E2E_ADMIN_LOGIN`, `E2E_ADMIN_PASSWORD` | тестовый админ из сида stage | проверка админки **пропускается** |
+| `E2E_STAGE_TEST_ORDER_TOKEN`, `E2E_PROD_TEST_ORDER_TOKEN` | `TEST_ORDER_TOKEN` сервера stage / прода (`docs/site-contract.md` §5): тестовый заказ и чтение заказа/остатка через API. В `smoke.yml` передаётся как `E2E_TEST_ORDER_TOKEN` | тестовый заказ и заказ гостя **пропускаются** |
 
 Пропущенные тесты и причина видны в сводке запуска. Basic-auth отправляется
-только на домен сайта. На прод секреты не передаются.
+только на домен сайта. На прод передаётся только `E2E_TEST_ORDER_TOKEN` прода.
 
 ### 5. Разрешить вызов workflow из этого репозитория
 
@@ -184,22 +185,27 @@ checks добавьте `stage-smoke`: тогда PR develop → main нельз
 
 | Сценарий | Файл | Теги | Где | Нужно |
 |---|---|---|---|---|
-| Ключевые страницы (главная, категория, товар, поиск + свои): ответ < 400, виден `readySelector`, нет экрана ошибки Next.js | `keyPages.spec.mjs` | `@smoke @prod-safe` | stage, prod | — |
+| Ключевые страницы (главная, категория, товар, поиск + свои): ответ < 400, виден `readySelector`, нет экрана ошибки Next.js и ошибок в консоли браузера | `keyPages.spec.mjs` | `@smoke @prod-safe` | stage, prod | — |
 | sitemap.xml и robots.txt отвечают 200 | `seo.spec.mjs` | `@smoke @prod-safe` | stage, prod | — |
 | sitemap содержит `<urlset`/`<sitemapindex`, robots — `Sitemap:`, на `seo.indexedPaths` нет `noindex` (meta и X-Robots-Tag) | `seo.spec.mjs` | `@smoke @prod-safe` | только prod (stage закрыт от индексации намеренно) | — |
 | Фильтр категории: параметр в URL и товары в выдаче | `categoryFilter.spec.mjs` | `@smoke @prod-safe` | stage, prod | — |
-| Гость: каталог → корзина → заказ с доставкой Новой почтой | `guestCheckout.spec.mjs` | `@smoke` | stage | — |
-| Вход и выход покупателя | `customerAuth.spec.mjs` | `@smoke` | stage | секреты покупателя |
-| Заказ авторизованного покупателя с автозаполнением | `authorizedCheckout.spec.mjs` | `@smoke` | stage | секреты покупателя |
-| Вход в админку | `adminAccess.spec.mjs` | `@smoke` | stage | секреты админа |
+| Гость: каталог → корзина (сумма = цена товара) → заказ с доставкой Новой почтой → заказ в базе с той же суммой и товаром | `guestCheckout.spec.mjs` | `@smoke` | stage | `E2E_TEST_ORDER_TOKEN` |
+| Вход и выход покупателя; после выхода старый токен отклоняется API | `customerAuth.spec.mjs` | `@smoke` | stage | секреты покупателя |
+| Заказ авторизованного покупателя с автозаполнением; заказ виден в кабинете | `authorizedCheckout.spec.mjs` | `@smoke` | stage | секреты покупателя |
+| Вход в админку; список заказов загружается | `adminAccess.spec.mjs` | `@smoke` | stage | секреты админа |
+| Тестовый заказ: помечен `isTest`, сумма и товар как в корзине, остаток не изменился, отменён на сайте (и в CRM — на проде) | `testOrder.spec.mjs` | `@smoke @test-order` | stage (товар сида), prod (`testOrder.product`) | `E2E_TEST_ORDER_TOKEN` |
 
 - В тестах нет URL и данных сайта — только из `site.config.mjs` и `site.adapter.mjs`.
 - Ответы API Новой почты в браузере подменяются данными из `site.config.mjs`
   (`e2e/lib/novaPoshtaStub.mjs`): smoke не зависит от доступности НП.
 - Покупатель-гость вымышленный (`e2e/config/fakeBuyer.config.mjs`): фамилия
   «Тестовий/Тестова», email на `example.com`.
-- На проде запускаются только `@prod-safe`: это задаёт фильтр в
+- На проде запускаются только `@prod-safe` и `@test-order`: это задаёт фильтр в
   `playwright.config.mjs` и страхует фикстура `prodWriteProtection`.
+- Тестовый заказ: заголовок `X-Test-Order-Token` уходит только в запрос
+  оформления, пиксели/тег-менеджеры и события витрины в браузере блокируются,
+  покупатель — «Тест Автоперевірка» с ничьим номером `+380100000001`
+  (`e2e/config/testOrder.config.mjs`). Номер заказа — в аннотации теста в отчёте.
 - Тесты идут последовательно (один тестовый покупатель и товар на сайт), в CI —
   один повтор упавшего теста; прошедший с повтора помечается «нестабильным».
 
@@ -215,7 +221,8 @@ SITE_E2E_DIR=../../-Sana/e2e E2E_TARGET_ENV=stage \
 E2E_BASIC_AUTH_USER=... E2E_BASIC_AUTH_PASSWORD=... \
 E2E_BROWSER_CHANNEL=msedge npx playwright test
 
-# Только чтение на проде (только @prod-safe, что бы ни было в E2E_GREP):
+# Прод: только @prod-safe и @test-order, что бы ни было в E2E_GREP. Без
+# E2E_TEST_ORDER_TOKEN тестовый заказ пропускается — остаётся только чтение:
 SITE_E2E_DIR=../../-Sana/e2e E2E_TARGET_ENV=prod E2E_BROWSER_CHANNEL=msedge npx playwright test
 ```
 
@@ -251,19 +258,23 @@ npx playwright test
 
 ## Версии
 
-- Сайты ссылаются на тег `v1`: `uses: keykey-team/site-ci-kit/.github/workflows/ci.yml@v1`
-  и `kit-ref: v1` в `smoke.yml` (версия сценариев).
+- Сайты ссылаются на мажорный тег: `uses: keykey-team/site-ci-kit/.github/workflows/ci.yml@v2`
+  и `kit-ref: v2` в `smoke.yml` (версия сценариев).
+- `v2` (06641): тестовый заказ на проде, проверки суммы корзины, заказа в базе,
+  кабинета, отзыва токена, списка заказов в админке и консоли браузера. Новые
+  обязательные поля `api.*`, `testOrder.*` и функции адаптера — §3 и §5
+  `docs/site-contract.md`. `v1` остаётся для сайтов, которые ещё не перешли.
 - Совместимые изменения (новый необязательный input или поле конфига, новый
-  тест на уже существующих функциях адаптера, исправление) — новый тег `v1.x.y`
-  и перенос `v1` на него:
+  тест на уже существующих функциях адаптера, исправление) — новый тег `v2.x.y`
+  и перенос `v2` на него:
 
   ```bash
-  git tag v1.1.0 && git tag -f v1 v1.1.0
-  git push origin v1.1.0 && git push -f origin v1
+  git tag v2.1.0 && git tag -f v2 v2.1.0
+  git push origin v2.1.0 && git push -f origin v2
   ```
 
 - Несовместимые (новое обязательное поле конфига, новая функция адаптера, смена
-  имён джобов или проверок) — тег `v2`; сайты переходят на него сами, обновив
-  `e2e/`, `@v2` и `kit-ref: v2`.
+  имён джобов или проверок) — следующий мажорный тег (`v3`); сайты переходят на
+  него сами, обновив `e2e/`, `@v3` и `kit-ref: v3`.
 - Новая функция адаптера — несовместимое изменение: библиотека требует все
   функции контракта, и старые адаптеры сайтов перестанут проходить проверку.
