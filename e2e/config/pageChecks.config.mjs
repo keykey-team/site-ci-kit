@@ -13,6 +13,12 @@ export const PAGE_ERROR_SELECTORS = [".next-error-h1"];
 // (код відповіді при цьому 200 — тому окрема перевірка).
 export const PAGE_ERROR_TEXTS = ["Application error: a client-side exception has occurred"];
 
+// Скільки чекати після появи контенту, перш ніж читати помилки консолі:
+// React гідратує сторінку й кидає помилку невідповідності вже після першого
+// рендеру (на проді Sana — за ~1 с). 2 с — із запасом, але не роздуваючи
+// набір із десятка сторінок.
+export const CONSOLE_SETTLE_DELAY_MS = 2_000;
+
 // Корінь валідного sitemap: звичайний список URL або індекс sitemap-файлів.
 export const SITEMAP_ROOT_MARKERS = ["<urlset", "<sitemapindex"];
 

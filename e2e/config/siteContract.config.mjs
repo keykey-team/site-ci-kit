@@ -21,6 +21,13 @@ export const REQUIRED_SITE_CONFIG_FIELDS = [
   "seo.sitemapPath",
   "seo.robotsPath",
   "seo.indexedPaths",
+  // 06641: API сайту для перевірок без браузера (§3 контракту).
+  "api.customerProfilePath",
+  "api.testOrderReadPath",
+  "api.stockReadPath",
+  // 06641: тестове замовлення на проді.
+  "testOrder.createOrderUrlPattern",
+  "testOrder.product.path",
 ];
 
 // Ключові сторінки з задачі 06640. Сайт може додати свої понад ці.
@@ -48,6 +55,12 @@ export const SITE_ADAPTER_FUNCTION_NAMES = [
   "expectAdminPanel",
   "applyCategoryFilter",
   "readListedProductCount",
+  // 06641: сума кошика, номер замовлення, кабінет, токен сесії, список замовлень в адмінці.
+  "readCartTotal",
+  "readPlacedOrderNumber",
+  "expectOrderInCustomerAccount",
+  "readCustomerSessionToken",
+  "expectAdminOrdersList",
 ];
 
 // Секрети — лише з env раннера, ніколи з конфігу сайту (§3 контракту).
@@ -58,4 +71,7 @@ export const SECRET_ENV_NAMES = {
   customerOtpCode: "E2E_CUSTOMER_OTP_CODE",
   adminLogin: "E2E_ADMIN_LOGIN",
   adminPassword: "E2E_ADMIN_PASSWORD",
+  // Секрет тестового замовлення (TEST_ORDER_TOKEN сервера сайту): ним же
+  // відкривається читання замовлення й залишку через API для перевірки.
+  testOrderToken: "E2E_TEST_ORDER_TOKEN",
 };

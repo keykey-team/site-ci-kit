@@ -1,11 +1,12 @@
 import { test as playwrightTest, expect } from "@playwright/test";
-import { PROD_SAFE_TAG } from "../config/runner.config.mjs";
+import { PROD_SAFE_TAG, TEST_ORDER_TAG } from "../config/runner.config.mjs";
 import { SECRET_ENV_NAMES } from "../config/siteContract.config.mjs";
-import { createFakeBuyer } from "./fakeBuyer.mjs";
+import { createFakeBuyer, createTestOrderBuyer } from "./fakeBuyer.mjs";
 import { stubNovaPoshtaApi } from "./novaPoshtaStub.mjs";
 import { loadSiteAdapter } from "./siteAdapter.mjs";
 import { loadSiteConfig } from "./siteConfig.mjs";
 import { isProdEnvironment, readTargetEnvironment } from "./targetEnvironment.mjs";
+import { isAllowedOnProd } from "./testFilter.mjs";
 
 /**
  * Значення секретів з env. Якщо хоч одного немає — тест пропускається (не
@@ -47,13 +48,12 @@ export const test = playwrightTest.extend({
 
   // Друга лінія захисту проду після фільтра запуску (testFilter.mjs): навіть
   // якщо фільтр обійдено (свій --config, правка testFilter), тест без
-  // @prod-safe на проді не виконується.
+  // @prod-safe чи @test-order на проді не виконується.
   prodWriteProtection: [
     async ({ targetEnvironment }, use, testInfo) => {
-      const isWritingTest = !testInfo.tags.includes(PROD_SAFE_TAG);
       testInfo.skip(
-        isProdEnvironment(targetEnvironment) && isWritingTest,
-        `Тест без ${PROD_SAFE_TAG} — только для stage (может писать данные), на проде не запускается`,
+        isProdEnvironment(targetEnvironment) && !isAllowedOnProd(testInfo.tags),
+        `Тест без ${PROD_SAFE_TAG} / ${TEST_ORDER_TAG} — только для stage (может писать данные), на проде не запускается`,
       );
       await use();
     },
@@ -68,6 +68,18 @@ export const test = playwrightTest.extend({
 
   buyer: async ({}, use) => {
     await use(createFakeBuyer());
+  },
+
+  // Покупець тестового замовлення: нічий номер +380100000001 (06641).
+  testOrderBuyer: async ({}, use) => {
+    await use(createTestOrderBuyer());
+  },
+
+  // Секрет тестового замовлення. Ним же читаються замовлення й залишок через
+  // API сайту, тому без нього пропускаються всі тести, що перевіряють базу.
+  testOrderToken: async ({}, use, testInfo) => {
+    const { testOrderToken } = readSecretsOrSkipTest(testInfo, { testOrderToken: SECRET_ENV_NAMES.testOrderToken });
+    await use(testOrderToken);
   },
 
   customerCredentials: async ({}, use, testInfo) => {
