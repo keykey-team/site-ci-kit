@@ -1,6 +1,8 @@
 // Доступність ключових сторінок (06640): головна, категорія, товар, пошук і
-// будь-які додаткові з keyPages у site.config.mjs.
-import { HTTP_ERROR_STATUS_MIN } from "../config/pageChecks.config.mjs";
+// будь-які додаткові з keyPages у site.config.mjs. З 06641 — ще й без помилок
+// у консолі браузера.
+import { CONSOLE_SETTLE_DELAY_MS, HTTP_ERROR_STATUS_MIN } from "../config/pageChecks.config.mjs";
+import { collectPageErrors } from "../lib/consoleErrors.mjs";
 import { expect, test } from "../lib/fixtures.mjs";
 import { expectNoErrorScreen } from "../lib/pageChecks.mjs";
 import { loadSiteConfig } from "../lib/siteConfig.mjs";
@@ -10,7 +12,11 @@ const siteConfig = await loadSiteConfig();
 
 test.describe("Ключевые страницы", () => {
   for (const [keyPageName, keyPage] of Object.entries(siteConfig.keyPages)) {
-    test(`${keyPageName} (${keyPage.path}) открывается без ошибки @smoke @prod-safe`, async ({ page }) => {
+    test(`${keyPageName} (${keyPage.path}) открывается без ошибки @smoke @prod-safe`, async ({ page, baseURL }) => {
+      const readPageErrors = collectPageErrors(page, {
+        siteOrigin: new URL(baseURL).origin,
+        ignorePatternSources: siteConfig.consoleErrorIgnorePatterns,
+      });
       const pageResponse = await page.goto(keyPage.path);
 
       expect(pageResponse, `${keyPage.path}: нет ответа сервера`).not.toBeNull();
@@ -22,6 +28,9 @@ test.describe("Ключевые страницы", () => {
         `${keyPage.path}: не появился «${keyPage.readySelector}»`,
       ).toBeVisible();
       await expectNoErrorScreen(page);
+      // Помилка гідратації з'являється вже після першого рендеру.
+      await page.waitForTimeout(CONSOLE_SETTLE_DELAY_MS);
+      expect(readPageErrors(), `${keyPage.path}: ошибки в консоли браузера`).toEqual([]);
     });
   }
 });

@@ -11,6 +11,7 @@ import {
   FAKE_BUYER_PHONE_TRUNK_PREFIX,
   FAKE_BUYER_UNIQUE_SUFFIX_LENGTH,
 } from "../config/fakeBuyer.config.mjs";
+import { TEST_ORDER_BUYER } from "../config/testOrder.config.mjs";
 
 // Цифр у десятковій системі: randomInt(10) дає одну цифру 0–9.
 const DECIMAL_DIGIT_VARIANT_COUNT = 10;
@@ -41,5 +42,16 @@ export function createFakeBuyer() {
     phoneNational: nationalPhone,
     email: `${FAKE_BUYER_EMAIL_PREFIX}-${generateUniqueSuffix()}@${FAKE_BUYER_EMAIL_DOMAIN}`,
     orderComment: FAKE_BUYER_ORDER_COMMENT,
+  };
+}
+
+/**
+ * Покупець тестового замовлення на проді (06641): завжди той самий нічий номер
+ * і помітне ім'я «Тест Автоперевірка» — у CRM його видно з першого погляду.
+ */
+export function createTestOrderBuyer() {
+  return {
+    ...TEST_ORDER_BUYER,
+    fullName: [TEST_ORDER_BUYER.lastName, TEST_ORDER_BUYER.firstName, TEST_ORDER_BUYER.middleName].filter(Boolean).join(" "),
   };
 }
