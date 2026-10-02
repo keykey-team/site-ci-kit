@@ -18,15 +18,28 @@ function failNotImplemented(adapterFunctionName) {
   throw new Error(`site.adapter.mjs: ${adapterFunctionName} ещё не реализована для этого сайта`);
 }
 
-/** Відкрити siteConfig.testProduct.path, обрати optionLabel, додати в кошик і дочекатися підтвердження. */
+/**
+ * Відкрити siteConfig.testProduct.path, обрати optionLabel (null — перший
+ * доступний варіант), додати в кошик і дочекатися підтвердження.
+ * Повертає { unitPrice, sku }: ціну обраного варіанта з картки (число, грн) і
+ * SKU варіанта, що потрапив у кошик (06641 — звірка з кошиком і базою).
+ */
 export async function addTestProductToCart(page, siteConfig) {
   // TODO: await page.goto(siteConfig.testProduct.path);
   //       await page.getByRole("button", { name: siteConfig.testProduct.optionLabel }).click();
+  //       const unitPrice = Number((await page.getByTestId("product-price").innerText()).replace(/\D/g, ""));
+  //       const sku = await page.getByTestId("selected-variant").getAttribute("data-sku");
   //       await page.getByRole("button", { name: "Додати в кошик" }).click();
   //       await expect(<лічильник кошика>).toHaveText("1");
+  //       return { unitPrice, sku };
   // Для авторизованого покупця кошик зберігається на сервері: залишки
   // минулих запусків прибирає `npm run seed:reset` або цей крок.
   failNotImplemented("addTestProductToCart");
+}
+
+/** Сума товарів у кошику / на оформленні (без доставки), числом у гривнях. */
+export async function readCartTotal(page) {
+  failNotImplemented("readCartTotal");
 }
 
 /** Відкрити форму оформлення з поточним кошиком. */
@@ -63,6 +76,16 @@ export async function expectOrderPlaced(page) {
   failNotImplemented("expectOrderPlaced");
 }
 
+/** Номер щойно оформленого замовлення (рядком) — з URL «дякуємо» чи атрибута підтвердження. */
+export async function readPlacedOrderNumber(page) {
+  failNotImplemented("readPlacedOrderNumber");
+}
+
+/** Відкрити історію замовлень у кабінеті й переконатися, що orderNumber там є. */
+export async function expectOrderInCustomerAccount(page, orderNumber) {
+  failNotImplemented("expectOrderInCustomerAccount");
+}
+
 /** Увійти як тестовий покупець: телефон + код з env (на stage SMS не шлеться). */
 export async function loginCustomer(page, { phone, otpCode }) {
   failNotImplemented("loginCustomer");
@@ -73,7 +96,12 @@ export async function expectCustomerLoggedIn(page) {
   failNotImplemented("expectCustomerLoggedIn");
 }
 
-/** Вийти з кабінету. */
+/** Bearer-токен покупця (зазвичай кука), поки він увійшов: бібліотека перевіряє, що після виходу він не діє. */
+export async function readCustomerSessionToken(page) {
+  failNotImplemented("readCustomerSessionToken");
+}
+
+/** Вийти з кабінету. Сайт має відкликати токен на сервері, а не лише стерти куку. */
 export async function logoutCustomer(page) {
   failNotImplemented("logoutCustomer");
 }
@@ -97,6 +125,11 @@ export async function loginAdmin(page, { login, password }) {
 /** Видно панель адмінки (а не форму входу). */
 export async function expectAdminPanel(page) {
   failNotImplemented("expectAdminPanel");
+}
+
+/** (Адмін уже увійшов) відкрити список замовлень і переконатися, що він завантажився без помилки. */
+export async function expectAdminOrdersList(page) {
+  failNotImplemented("expectAdminOrdersList");
 }
 
 /** Поставити фільтр на вже відкритій сторінці siteConfig.categoryFilter.categoryPath. */
