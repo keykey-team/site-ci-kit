@@ -18,6 +18,17 @@ function buildIgnoredErrorMatchers(ignorePatternSources = []) {
 }
 
 /**
+ * Відомий шум консолі для цього оточення з site.config.mjs: або один список на
+ * всі оточення, або { stage: [...], prod: [...] } — коли шум є лише на stage
+ * (застаріла копія бази, інші домени), а на проді та сама помилка — справжня.
+ */
+export function readConsoleErrorIgnorePatterns(siteConfig, targetEnvironment) {
+  const configuredIgnorePatterns = siteConfig.consoleErrorIgnorePatterns ?? [];
+  if (Array.isArray(configuredIgnorePatterns)) return configuredIgnorePatterns;
+  return configuredIgnorePatterns[targetEnvironment] ?? [];
+}
+
+/**
  * Починає збирати помилки на сторінці й повертає функцію, що віддає їх список
  * (тексти для звіту). Викликати до page.goto.
  */
