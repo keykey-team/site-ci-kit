@@ -5,8 +5,10 @@
 #   target-env: stage — усі тести з тегом grep; коміту ставиться статус
 #                       stage-smoke (success/failure), по ньому deploy-gate.yml
 #                       пускає або не пускає цей код на прод.
-#   target-env: prod  — лише тести з @prod-safe (нічого не пишуть). Статус не
-#                       ставиться: прод уже задеплоєно, червоний smoke — це алерт.
+#   target-env: prod  — лише тести з @prod-safe (нічого не пишуть) і тестове
+#                       замовлення @test-order (сайт позначає його isTest і
+#                       скасовує, 06641). Статус не ставиться: прод уже
+#                       задеплоєно, червоний smoke — це алерт.
 #
 # HTML-звіт Playwright — артефакт запуску, посилання на нього — у зведенні.
 # Приклад виклику — examples/caller-workflows/deploy.yml.
@@ -26,7 +28,7 @@ on:
       kit-ref:
         description: Версия site-ci-kit для сценариев; держите равной @-версии в uses
         type: string
-        default: v1
+        default: v2
       grep:
         description: Тег (регулярное выражение) отбора тестов; на prod дополнительно только @prod-safe
         type: string
@@ -57,6 +59,9 @@ on:
         required: false
       E2E_ADMIN_PASSWORD:
         description: Пароль тестового админа из сида stage
+        required: false
+      E2E_TEST_ORDER_TOKEN:
+        description: TEST_ORDER_TOKEN сервера этого окружения — тестовый заказ и чтение заказа/остатка через API (06641)
         required: false
 
 # statuses: write — лише для статусу stage-smoke на коміті; код тільки читається.
@@ -174,6 +179,7 @@ jobs:
           E2E_CUSTOMER_OTP_CODE: ${{ secrets.E2E_CUSTOMER_OTP_CODE }}
           E2E_ADMIN_LOGIN: ${{ secrets.E2E_ADMIN_LOGIN }}
           E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD }}
+          E2E_TEST_ORDER_TOKEN: ${{ secrets.E2E_TEST_ORDER_TOKEN }}
         run: npx playwright test
 
       - name: Upload Playwright report

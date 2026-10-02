@@ -21,7 +21,7 @@ jobs:
   # Ім'я job — перша частина імені перевірки («ci / lint»). Не перейменовуйте
   # без оновлення правил гілки: старі обов'язкові перевірки чекатимуть вічно.
   ci:
-    uses: keykey-team/site-ci-kit/.github/workflows/ci.yml@v1
+    uses: keykey-team/site-ci-kit/.github/workflows/ci.yml@v2
     with:
       # Приклад для Sana: сервер і клієнт в окремих каталогах.
       install-command: npm ci --prefix server --no-audit --no-fund && npm ci --prefix client --no-audit --no-fund --legacy-peer-deps
