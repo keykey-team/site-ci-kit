@@ -77,7 +77,9 @@ env:
   KIT_REPOSITORY: keykey-team/site-ci-kit
   # Куди кладеться site-ci-kit поруч із кодом сайту.
   KIT_CHECKOUT_PATH: .site-ci-kit
-  REPORT_ARTIFACT_NAME: site-smoke-report-${{ inputs.target-env }}
+  # Другий виклик у тому самому запуску (регресія зі своїм status-context,
+  # 06646) кладе звіт під своїм іменем, а не поверх звіту smoke.
+  REPORT_ARTIFACT_NAME: site-smoke-report-${{ inputs.target-env }}${{ inputs.status-context != 'stage-smoke' && format('-{0}', inputs.status-context) || '' }}
   # Звіт потрібен, поки розбираються з падінням; 14 днів покривають відпустку
   # чергового і не роздувають сховище артефактів.
   REPORT_RETENTION_DAYS: 14

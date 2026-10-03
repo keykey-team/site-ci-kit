@@ -1,6 +1,7 @@
 import { test as playwrightTest, expect } from "@playwright/test";
 import { PROD_SAFE_TAG, TEST_ORDER_TAG } from "../config/runner.config.mjs";
-import { SECRET_ENV_NAMES } from "../config/siteContract.config.mjs";
+import { CATALOG_SCENARIO_CONFIG_KEY, SECRET_ENV_NAMES } from "../config/siteContract.config.mjs";
+import { describeCatalogScenarioGap } from "./catalogScenario.mjs";
 import { createFakeBuyer, createTestOrderBuyer } from "./fakeBuyer.mjs";
 import { stubNovaPoshtaApi } from "./novaPoshtaStub.mjs";
 import { loadSiteAdapter } from "./siteAdapter.mjs";
@@ -88,6 +89,15 @@ export const test = playwrightTest.extend({
       customerOtpCode: SECRET_ENV_NAMES.customerOtpCode,
     });
     await use({ phone: customerPhone, otpCode: customerOtpCode });
+  },
+
+  // Дані регресії каталогу з site.config.mjs (06646). Сайт, який її не
+  // підключив (немає блока catalogScenario чи кроків адаптера), ці тести
+  // пропускає з поясненням — решта набору лишається зеленою.
+  catalogScenario: async ({ siteConfig, siteAdapter }, use, testInfo) => {
+    const catalogScenarioGap = describeCatalogScenarioGap(siteConfig, siteAdapter);
+    testInfo.skip(Boolean(catalogScenarioGap), `${catalogScenarioGap} — тест пропущен`);
+    await use(siteConfig[CATALOG_SCENARIO_CONFIG_KEY]);
   },
 
   adminCredentials: async ({}, use, testInfo) => {

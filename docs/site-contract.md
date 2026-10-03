@@ -234,3 +234,67 @@ phoneInternational (+380…), phoneNational (0…), email (@example.com), orderC
 `GET api.customerProfilePath` со старым Bearer-токеном — 401/403 (smoke это
 проверяет). Хранить отозванные токены достаточно до их естественного истечения
 (TTL-индекс).
+
+## 6. Регрессия каталога (необязательно, 06646)
+
+Подробные сценарии каталога второго приоритета: тег `@regression`, только
+stage (опираются на товары сида), в `@smoke` и в гейт прода не входят. Сайт
+подключает их, добавив блок `catalogScenario` в `site.config.mjs` и функции
+ниже в `site.adapter.mjs`. Сайт без блока или без функций эти тесты
+**пропускает** с пояснением в отчёте — остальное не меняется.
+
+```js
+// site.config.mjs
+catalogScenario: {
+  // Категория с тестовыми товарами сида.
+  categoryPath: "/catalog/e2e-...",
+  // Размер, который есть в наличии минимум у двух товаров категории с разной ценой.
+  filteredSizeLabel: "41",
+  // Что появляется в URL (после decodeURIComponent) при выборе этого размера и сортировки.
+  filteredSizeUrlFragment: "attrs[size]=41_0",
+  sortUrlFragments: { cheapestFirst: "sort=price_asc", mostExpensiveFirst: "sort=price_desc" },
+  // Товар с двумя размерами разной цены и одним распроданным.
+  variantProduct: {
+    path: "/product/e2e-...",
+    firstSize: { label: "42", priceUah: 1000 },
+    secondSize: { label: "43", priceUah: 1200 },
+    soldOutSizeLabel: "44",
+  },
+  // Адрес каталога, по которому товаров нет.
+  emptyResultPath: "/catalog/e2e-...?attrs[size]=44_0",
+},
+```
+
+| Функция адаптера | Что делает на сайте |
+|---|---|
+| `applyCatalogSizeFilter(page, sizeLabel)` | На открытой категории ставит фильтр по размеру с этой подписью. |
+| `applyCatalogSort(page, sortOrder)` | Выбирает сортировку: `sortOrder` — `"cheapestFirst"` или `"mostExpensiveFirst"`. |
+| `readListedProducts(page)` | **Возвращает** товары выдачи по порядку: `[{ name, priceUah }]`; пустая выдача — `[]`. |
+| `openFirstListedProduct(page)` | Открывает первый товар выдачи и ждёт страницу товара. |
+| `readSelectedSizeLabel(page)` | **Возвращает** подпись размера, выбранного на странице товара. |
+| `chooseProductSize(page, sizeLabel)` | Выбирает размер на странице товара. |
+| `readSelectedVariantOffer(page)` | **Возвращает** `{ priceUah, sku }` выбранного размера. |
+| `readOfferedSizeLabels(page)` | **Возвращает** подписи размеров, которые сайт предлагает купить (распроданных среди них нет). |
+| `expectCatalogEmptyState(page)` | Проверяет, что вместо товаров видно сообщение «ничего не найдено». |
+| `resetCatalogFilters(page)` | Сбрасывает фильтры из этого сообщения. |
+
+Запуск — отдельным вызовом `smoke.yml` со своим статусом коммита, чтобы
+результат регрессии не влиял на гейт прода (он смотрит на `stage-smoke`):
+
+```yaml
+regression-stage:
+  needs: [seed-stage]
+  uses: keykey-team/site-ci-kit/.github/workflows/smoke.yml@v2
+  permissions: { contents: read, statuses: write }
+  with:
+    target-env: stage
+    kit-ref: v2
+    grep: "@regression"
+    status-context: stage-regression
+  secrets:
+    E2E_BASIC_AUTH_USER: ${{ secrets.E2E_BASIC_AUTH_USER }}
+    E2E_BASIC_AUTH_PASSWORD: ${{ secrets.E2E_BASIC_AUTH_PASSWORD }}
+```
+
+Отчёт Playwright такого вызова — артефакт `site-smoke-report-stage-stage-regression`.
+

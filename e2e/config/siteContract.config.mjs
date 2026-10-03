@@ -63,6 +63,50 @@ export const SITE_ADAPTER_FUNCTION_NAMES = [
   "expectAdminOrdersList",
 ];
 
+// ---- Необов'язкова частина контракту: регресія каталогу (06646) ----------
+//
+// Сайт підключає її, додавши в site.config.mjs блок catalogScenario й
+// експортувавши з site.adapter.mjs функції нижче. Сайт без блока чи без
+// функцій ці тести пропускає з поясненням — тому це сумісна зміна (v2.x), а не
+// нова обов'язкова функція адаптера.
+export const CATALOG_SCENARIO_CONFIG_KEY = "catalogScenario";
+
+// Поля catalogScenario (шлях через крапку), без яких сценарії не мають даних.
+export const CATALOG_SCENARIO_REQUIRED_FIELDS = [
+  "categoryPath",
+  "filteredSizeLabel",
+  "filteredSizeUrlFragment",
+  "sortUrlFragments.cheapestFirst",
+  "sortUrlFragments.mostExpensiveFirst",
+  "variantProduct.path",
+  "variantProduct.firstSize.label",
+  "variantProduct.firstSize.priceUah",
+  "variantProduct.secondSize.label",
+  "variantProduct.secondSize.priceUah",
+  "variantProduct.soldOutSizeLabel",
+  "emptyResultPath",
+];
+
+// Ключі порядку сортування: їх отримує applyCatalogSort і ними названі поля
+// catalogScenario.sortUrlFragments.
+export const CATALOG_SORT_ORDER = Object.freeze({
+  cheapestFirst: "cheapestFirst",
+  mostExpensiveFirst: "mostExpensiveFirst",
+});
+
+export const CATALOG_SCENARIO_ADAPTER_FUNCTION_NAMES = [
+  "applyCatalogSizeFilter",
+  "applyCatalogSort",
+  "readListedProducts",
+  "openFirstListedProduct",
+  "readSelectedSizeLabel",
+  "chooseProductSize",
+  "readSelectedVariantOffer",
+  "readOfferedSizeLabels",
+  "expectCatalogEmptyState",
+  "resetCatalogFilters",
+];
+
 // Секрети — лише з env раннера, ніколи з конфігу сайту (§3 контракту).
 export const SECRET_ENV_NAMES = {
   basicAuthUser: "E2E_BASIC_AUTH_USER",
