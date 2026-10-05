@@ -87,6 +87,10 @@ export const BROWSER_PROJECT_NAME = "chromium";
 export const MOBILE_BROWSER_DEVICE_NAME = "iPhone 14";
 export const MOBILE_BROWSER_PROJECT_NAME = "mobile-webkit";
 
+// Ім'я рушія WebKit у Playwright (фікстура browserName): для нього basic-auth
+// stage передається окремо — lib/basicAuth.mjs.
+export const WEBKIT_BROWSER_NAME = "webkit";
+
 // Мова й часовий пояс покупця: сайти українські, інакше частина текстів і дат
 // на сторінці відрізнялася б від того, що бачить людина.
 export const BROWSER_LOCALE = "uk-UA";
