@@ -1,9 +1,14 @@
 import { test as playwrightTest, expect } from "@playwright/test";
 import { PROD_SAFE_TAG, TEST_ORDER_TAG } from "../config/runner.config.mjs";
-import { CATALOG_SCENARIO_CONFIG_KEY, SECRET_ENV_NAMES } from "../config/siteContract.config.mjs";
+import {
+  CATALOG_SCENARIO_CONFIG_KEY,
+  OPTIONAL_SCENARIO_CONTRACT,
+  SECRET_ENV_NAMES,
+} from "../config/siteContract.config.mjs";
 import { describeCatalogScenarioGap } from "./catalogScenario.mjs";
 import { createFakeBuyer, createTestOrderBuyer } from "./fakeBuyer.mjs";
 import { stubNovaPoshtaApi } from "./novaPoshtaStub.mjs";
+import { describeOptionalScenarioGap } from "./optionalScenario.mjs";
 import { loadSiteAdapter } from "./siteAdapter.mjs";
 import { loadSiteConfig } from "./siteConfig.mjs";
 import { isProdEnvironment, readTargetEnvironment } from "./targetEnvironment.mjs";
@@ -23,6 +28,19 @@ function readSecretsOrSkipTest(testInfo, secretEnvNames) {
   return Object.fromEntries(
     Object.entries(secretEnvNames).map(([credentialName, secretEnvName]) => [credentialName, process.env[secretEnvName]]),
   );
+}
+
+/**
+ * Фікстура необов'язкового сценарію регресії (06649): блок сценарію з
+ * site.config.mjs. Сайт, який сценарій не підключив, тест пропускає з
+ * поясненням, чого бракує, — решта набору лишається зеленою.
+ */
+function createOptionalScenarioFixture(scenarioContract) {
+  return async ({ siteConfig, siteAdapter }, use, testInfo) => {
+    const scenarioGap = describeOptionalScenarioGap(siteConfig, siteAdapter, scenarioContract);
+    testInfo.skip(Boolean(scenarioGap), `${scenarioGap} — тест пропущен`);
+    await use(siteConfig[scenarioContract.configKey]);
+  };
 }
 
 export const test = playwrightTest.extend({
@@ -106,6 +124,22 @@ export const test = playwrightTest.extend({
       adminPassword: SECRET_ENV_NAMES.adminPassword,
     });
     await use({ login: adminLogin, password: adminPassword });
+  },
+
+  // Сценарії регресії другого пріоритету (06649), кожен підключається окремо.
+  cartVariantsScenario: createOptionalScenarioFixture(OPTIONAL_SCENARIO_CONTRACT.cartVariants),
+  adminCatalogEditScenario: createOptionalScenarioFixture(OPTIONAL_SCENARIO_CONTRACT.adminCatalogEdit),
+  mobileCheckoutScenario: createOptionalScenarioFixture(OPTIONAL_SCENARIO_CONTRACT.mobileCheckout),
+  onlinePaymentScenario: createOptionalScenarioFixture(OPTIONAL_SCENARIO_CONTRACT.onlinePayment),
+
+  // Вкладка покупця без входу в окремому браузерному контексті: поки в
+  // основній вкладці працює адмін, вітрину дивимось так, як її бачить
+  // сторонній покупець — без кук адміна. Налаштування (адреса сайту,
+  // basic-auth, мова) контекст успадковує з конфігу запуску.
+  anonymousBuyerPage: async ({ browser }, use) => {
+    const anonymousBuyerContext = await browser.newContext();
+    await use(await anonymousBuyerContext.newPage());
+    await anonymousBuyerContext.close();
   },
 });
 

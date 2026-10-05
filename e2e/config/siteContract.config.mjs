@@ -107,6 +107,72 @@ export const CATALOG_SCENARIO_ADAPTER_FUNCTION_NAMES = [
   "resetCatalogFilters",
 ];
 
+// ---- Необов'язкова частина контракту: регресія другого пріоритету (06649) --
+//
+// Чотири незалежні сценарії. Кожен сайт підключає окремо: блок у
+// site.config.mjs (configKey) + функції в site.adapter.mjs. Немає блока чи
+// функцій — тести цього сценарію пропускаються з поясненням (як і регресія
+// каталогу вище), решта набору не змінюється.
+//   requiredFields       — поля блока (шлях через крапку), без яких немає даних;
+//   adapterFunctionNames — кроки, які сценарій викликає понад обов'язкові;
+//   contractSection      — розділ docs/site-contract.md, куди веде пояснення пропуску.
+export const OPTIONAL_SCENARIO_CONTRACT = Object.freeze({
+  // Два варіанти одного товару в кошику: дві позиції, у кожної своє фото,
+  // розмір і колір, сума — сума двох цін.
+  cartVariants: Object.freeze({
+    configKey: "cartVariantsScenario",
+    contractSection: "§7",
+    requiredFields: [
+      "productPath",
+      "productName",
+      "firstVariant.optionLabel",
+      "firstVariant.priceUah",
+      "secondVariant.optionLabel",
+      "secondVariant.priceUah",
+    ],
+    adapterFunctionNames: ["addProductVariantToCart", "readCartRows"],
+  }),
+
+  // Правка ціни й залишку в адмінці видна покупцеві; із залишком 0 товар не купити.
+  adminCatalogEdit: Object.freeze({
+    configKey: "adminCatalogEditScenario",
+    contractSection: "§8",
+    requiredFields: [
+      "productPath",
+      "adminProductKey",
+      "optionLabel",
+      "sku",
+      "seededOffer.priceUah",
+      "seededOffer.stockQuantity",
+      "editedOffer.priceUah",
+      "editedOffer.stockQuantity",
+    ],
+    adapterFunctionNames: ["editProductOfferInAdmin", "readStorefrontOffer"],
+  }),
+
+  // Шлях каталог → замовлення на телефоні (проєкт mobile-webkit).
+  mobileCheckout: Object.freeze({
+    configKey: "mobileCheckoutScenario",
+    contractSection: "§9",
+    requiredFields: ["categoryPath", "productName", "optionLabel"],
+    adapterFunctionNames: ["openListedProductByName", "addOpenedProductToCart"],
+  }),
+
+  // Онлайн-оплата тестовою карткою зі знижкою (промокод або бонуси).
+  onlinePayment: Object.freeze({
+    configKey: "onlinePaymentScenario",
+    contractSection: "§10",
+    requiredFields: ["paymentProvider"],
+    adapterFunctionNames: [
+      "applyCheckoutDiscount",
+      "readCheckoutTotalToPay",
+      "chooseOnlineCardPayment",
+      "submitOrderForOnlinePayment",
+      "readThankYouOrderTotal",
+    ],
+  }),
+});
+
 // Секрети — лише з env раннера, ніколи з конфігу сайту (§3 контракту).
 export const SECRET_ENV_NAMES = {
   basicAuthUser: "E2E_BASIC_AUTH_USER",

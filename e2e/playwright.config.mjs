@@ -11,6 +11,8 @@ import {
   CI_RETRY_COUNT,
   EXPECT_TIMEOUT_MS,
   HTML_REPORT_DIRECTORY,
+  MOBILE_BROWSER_DEVICE_NAME,
+  MOBILE_BROWSER_PROJECT_NAME,
   NAVIGATION_TIMEOUT_MS,
   RUN_RESULTS_FILE,
   RUNNER_ENV_NAMES,
@@ -22,7 +24,7 @@ import { SECRET_ENV_NAMES } from "./config/siteContract.config.mjs";
 import { loadSiteAdapter } from "./lib/siteAdapter.mjs";
 import { loadSiteConfig } from "./lib/siteConfig.mjs";
 import { readTargetEnvironment } from "./lib/targetEnvironment.mjs";
-import { buildTestFilterPattern } from "./lib/testFilter.mjs";
+import { buildMobileTestFilterPattern, buildTestFilterPattern, MOBILE_TEST_PATTERN } from "./lib/testFilter.mjs";
 
 const isContinuousIntegration = Boolean(process.env[RUNNER_ENV_NAMES.isContinuousIntegration]);
 const isGithubActions = Boolean(process.env[RUNNER_ENV_NAMES.isGithubActions]);
@@ -60,7 +62,6 @@ export default defineConfig({
   outputDir: TEST_OUTPUT_DIRECTORY,
   timeout: TEST_TIMEOUT_MS,
   expect: { timeout: EXPECT_TIMEOUT_MS },
-  grep: buildTestFilterPattern(targetEnvironment),
   fullyParallel: false,
   workers: WORKER_COUNT,
   retries: isContinuousIntegration ? CI_RETRY_COUNT : 0,
@@ -78,12 +79,24 @@ export default defineConfig({
     screenshot: "only-on-failure",
   },
   projects: [
+    // Фільтр задається в кожному проєкті: фільтр проєкту замінює загальний, а
+    // не доповнює його (lib/testFilter.mjs). Тест з @mobile іде лише в
+    // мобільному проєкті, решта — лише в десктопному.
     {
       name: BROWSER_PROJECT_NAME,
+      grep: buildTestFilterPattern(targetEnvironment),
+      grepInvert: MOBILE_TEST_PATTERN,
       use: {
         ...devices[BROWSER_DEVICE_NAME],
         channel: process.env[RUNNER_ENV_NAMES.browserChannel] || undefined,
       },
+    },
+    // Мобільний профіль (06649): тести з тегом @mobile із того самого відбору.
+    // У звичайному smoke таких немає — проєкт порожній, WebKit не запускається.
+    {
+      name: MOBILE_BROWSER_PROJECT_NAME,
+      grep: buildMobileTestFilterPattern(targetEnvironment),
+      use: { ...devices[MOBILE_BROWSER_DEVICE_NAME] },
     },
   ],
 });

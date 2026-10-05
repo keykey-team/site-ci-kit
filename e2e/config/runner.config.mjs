@@ -42,6 +42,10 @@ export const TEST_ORDER_TAG = "@test-order";
 // статусом коміту. Лише stage: спираються на товари сида.
 export const REGRESSION_TAG = "@regression";
 
+// Тести мобільного профілю (06649): ідуть лише в проєкті MOBILE_BROWSER_PROJECT_NAME,
+// а десктопний проєкт їх пропускає. Тег ставиться разом із @regression.
+export const MOBILE_TAG = "@mobile";
+
 // Оформлення замовлення — це ~10 кроків, кожен з запитом до API stage.
 // 90 с — із запасом на повільний stage, але зависання не тягнеться до
 // timeout-minutes джоба (15 хв).
@@ -76,6 +80,12 @@ export const RUN_RESULTS_FILE = "test-results/run-results.json";
 // Профіль браузера: десктоп, як у більшості покупців з кошиком.
 export const BROWSER_DEVICE_NAME = "Desktop Chrome";
 export const BROWSER_PROJECT_NAME = "chromium";
+
+// Мобільний профіль (06649): iPhone на рушії WebKit — той самий рушій, що в
+// Safari на iPhone. Справжній пристрій він не замінює (ручний прогін лишається),
+// але ловить верстку й кліки, які ламаються саме на вузькому екрані й у WebKit.
+export const MOBILE_BROWSER_DEVICE_NAME = "iPhone 14";
+export const MOBILE_BROWSER_PROJECT_NAME = "mobile-webkit";
 
 // Мова й часовий пояс покупця: сайти українські, інакше частина текстів і дат
 // на сторінці відрізнялася б від того, що бачить людина.
