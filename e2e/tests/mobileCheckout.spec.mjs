@@ -6,8 +6,9 @@
 // вони поза екраном. Натискання в тесті справжні: Playwright не клацне по
 // кнопці, яку покупець не бачить або не може зачепити.
 // Лише stage: тест створює звичайне замовлення гостя.
+import { HTTP_ERROR_STATUS_MIN } from "../config/pageChecks.config.mjs";
 import { OPTIONAL_SCENARIO_CONTRACT } from "../config/siteContract.config.mjs";
-import { test } from "../lib/fixtures.mjs";
+import { expect, test } from "../lib/fixtures.mjs";
 import { expectNoHorizontalOverflow } from "../lib/layoutChecks.mjs";
 import { describeOptionalScenarioGap } from "../lib/optionalScenario.mjs";
 import { loadSiteAdapter } from "../lib/siteAdapter.mjs";
@@ -33,7 +34,10 @@ test("гость проходит путь каталог → заказ на iP
   const { categoryPath, productName, optionLabel } = mobileCheckoutScenario;
 
   await test.step(`открыть каталог ${categoryPath}`, async () => {
-    await page.goto(categoryPath);
+    // Код ответа проверяем явно: страница отказа («401», «502») тоже не шире
+    // экрана, и без этой проверки шаг прошёл бы на ней.
+    const categoryResponse = await page.goto(categoryPath);
+    expect(categoryResponse.status(), `каталог ответил ${categoryResponse.status()}`).toBeLessThan(HTTP_ERROR_STATUS_MIN);
     await expectNoHorizontalOverflow(page, "каталог");
   });
   await test.step(`открыть товар «${productName}» из выдачи`, async () => {

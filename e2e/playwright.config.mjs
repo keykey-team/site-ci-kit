@@ -20,7 +20,7 @@ import {
   TEST_TIMEOUT_MS,
   WORKER_COUNT,
 } from "./config/runner.config.mjs";
-import { SECRET_ENV_NAMES } from "./config/siteContract.config.mjs";
+import { buildSiteHttpCredentials } from "./lib/basicAuth.mjs";
 import { loadSiteAdapter } from "./lib/siteAdapter.mjs";
 import { loadSiteConfig } from "./lib/siteConfig.mjs";
 import { readTargetEnvironment } from "./lib/targetEnvironment.mjs";
@@ -36,15 +36,6 @@ const siteConfig = await loadSiteConfig();
 await loadSiteAdapter();
 
 const siteBaseUrl = siteConfig.baseUrls[targetEnvironment];
-
-// Basic-auth stage. Обмежено origin сайту: на сторонні домени (НП, аналітика)
-// логін і пароль не підуть, навіть якщо ті відповідять 401.
-function buildBasicAuthCredentials() {
-  const basicAuthUser = process.env[SECRET_ENV_NAMES.basicAuthUser];
-  const basicAuthPassword = process.env[SECRET_ENV_NAMES.basicAuthPassword];
-  if (!basicAuthUser || !basicAuthPassword) return undefined;
-  return { username: basicAuthUser, password: basicAuthPassword, origin: new URL(siteBaseUrl).origin };
-}
 
 function buildReporters() {
   const reporters = [
@@ -70,7 +61,9 @@ export default defineConfig({
   metadata: { siteKey: siteConfig.siteKey, targetEnvironment, siteBaseUrl },
   use: {
     baseURL: siteBaseUrl,
-    httpCredentials: buildBasicAuthCredentials(),
+    // Basic-auth stage, обмежений origin сайту. У WebKit цього мало — там ще
+    // заголовок із фікстури context (lib/basicAuth.mjs).
+    httpCredentials: buildSiteHttpCredentials(siteBaseUrl),
     locale: BROWSER_LOCALE,
     timezoneId: BROWSER_TIMEZONE_ID,
     actionTimeout: ACTION_TIMEOUT_MS,

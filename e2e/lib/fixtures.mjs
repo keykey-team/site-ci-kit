@@ -1,10 +1,11 @@
 import { test as playwrightTest, expect } from "@playwright/test";
-import { PROD_SAFE_TAG, TEST_ORDER_TAG } from "../config/runner.config.mjs";
+import { PROD_SAFE_TAG, TEST_ORDER_TAG, WEBKIT_BROWSER_NAME } from "../config/runner.config.mjs";
 import {
   CATALOG_SCENARIO_CONFIG_KEY,
   OPTIONAL_SCENARIO_CONTRACT,
   SECRET_ENV_NAMES,
 } from "../config/siteContract.config.mjs";
+import { sendBasicAuthToSiteOnly } from "./basicAuth.mjs";
 import { describeCatalogScenarioGap } from "./catalogScenario.mjs";
 import { createFakeBuyer, createTestOrderBuyer } from "./fakeBuyer.mjs";
 import { stubNovaPoshtaApi } from "./novaPoshtaStub.mjs";
@@ -79,6 +80,13 @@ export const test = playwrightTest.extend({
     { auto: true },
   ],
 
+  // У WebKit basic-auth stage з налаштувань запуску не спрацьовує на
+  // стандартному порту — заголовок додається тут (lib/basicAuth.mjs).
+  context: async ({ context, browserName, baseURL }, use) => {
+    if (browserName === WEBKIT_BROWSER_NAME) await sendBasicAuthToSiteOnly(context, baseURL);
+    await use(context);
+  },
+
   // Кожна сторінка тестів одразу з підміною API Нової пошти.
   page: async ({ page, siteConfig }, use) => {
     await stubNovaPoshtaApi(page, siteConfig.novaPoshta);
@@ -136,8 +144,9 @@ export const test = playwrightTest.extend({
   // основній вкладці працює адмін, вітрину дивимось так, як її бачить
   // сторонній покупець — без кук адміна. Налаштування (адреса сайту,
   // basic-auth, мова) контекст успадковує з конфігу запуску.
-  anonymousBuyerPage: async ({ browser }, use) => {
+  anonymousBuyerPage: async ({ browser, browserName, baseURL }, use) => {
     const anonymousBuyerContext = await browser.newContext();
+    if (browserName === WEBKIT_BROWSER_NAME) await sendBasicAuthToSiteOnly(anonymousBuyerContext, baseURL);
     await use(await anonymousBuyerContext.newPage());
     await anonymousBuyerContext.close();
   },
