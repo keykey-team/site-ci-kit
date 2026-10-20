@@ -171,6 +171,16 @@ export const OPTIONAL_SCENARIO_CONTRACT = Object.freeze({
       "readThankYouOrderTotal",
     ],
   }),
+
+  // Замовлення гостя з доставкою Укрпоштою (06967). На відміну від регресії
+  // вище — тег @smoke: у сайту з Укрпоштою це другий основний шлях оформлення,
+  // і він входить у гейт прода. Сайт без Укрпошти тест пропускає.
+  ukrposhtaCheckout: Object.freeze({
+    configKey: "ukrposhtaCheckoutScenario",
+    contractSection: "§11",
+    requiredFields: ["cityName"],
+    adapterFunctionNames: ["chooseUkrposhtaBranch"],
+  }),
 });
 
 // Секрети — лише з env раннера, ніколи з конфігу сайту (§3 контракту).
