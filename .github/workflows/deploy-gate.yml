@@ -5,6 +5,12 @@
 # звичайного коміту (fast-forward) — він сам. На цьому коміті має бути статус
 # stage-smoke = success (його ставить smoke.yml після деплою develop).
 #
+# Режим tested-branch (06967) — для сайтів, де задачі їдуть у main не злиттям
+# develop, а окремо (у develop є ще не випущений код): тоді коміт прода сам на
+# stage не перевірявся, і гейт дивиться на stage-smoke останнього перевіреного
+# коміту цієї гілки — того, що зараз на stage. Червоний або ще не завершений
+# smoke stage — прод стоїть.
+#
 # Ручний обхід — непорожній override-reason (у сайті: Run workflow →
 # gate-override-reason). Причина й автор пишуться у зведення запуску.
 # Приклад виклику — examples/caller-workflows/deploy.yml.
@@ -25,6 +31,10 @@ on:
         description: 'JSON-метки раннера: ["ubuntu-latest"] или ["self-hosted","rosteria"]'
         type: string
         default: '["ubuntu-latest"]'
+      tested-branch:
+        description: "Ветка stage (например develop): проверять последний stage-smoke этой ветки, а не родителей деплоимого коммита (06967)"
+        type: string
+        default: ""
 
 # contents — прочитати батьків коміту, statuses — прочитати stage-smoke.
 permissions:
@@ -42,13 +52,17 @@ jobs:
         env:
           STATUS_CONTEXT: ${{ inputs.status-context }}
           OVERRIDE_REASON: ${{ inputs.override-reason }}
+          TESTED_BRANCH: ${{ inputs.tested-branch }}
         with:
           script: |
             const statusContext = process.env.STATUS_CONTEXT;
             const overrideReason = (process.env.OVERRIDE_REASON ?? "").trim();
+            const testedBranch = (process.env.TESTED_BRANCH ?? "").trim();
             const deploySha = context.sha;
             // Скільки контекстів статусу читати з коміту: у сайтів їх одиниці.
             const statusPageSize = 100;
+            // Скільки останніх комітів гілки stage переглянути в пошуках smoke (режим tested-branch).
+            const testedBranchLookbackCommitCount = 30;
             const missingState = "missing";
             const successState = "success";
             // Короткий SHA, як його показує GitHub в історії комітів.
@@ -57,8 +71,33 @@ jobs:
 
             const { data: deployCommit } = await github.rest.repos.getCommit({ ...context.repo, ref: deploySha });
             const isMergeCommit = deployCommit.parents.length > 1;
-            // Перший батько merge-коміту — попередній main, решта — те, що влили.
-            const testedShas = isMergeCommit ? deployCommit.parents.slice(1).map((parentCommit) => parentCommit.sha) : [deploySha];
+            let testedShas;
+            if (testedBranch) {
+              // Останній коміт гілки stage, який проходив smoke. Коміти лише з
+              // документацією деплой не запускають (paths-ignore) — статусу в них
+              // немає, і гейт через них не має зупиняти прод.
+              const { data: recentBranchCommits } = await github.rest.repos.listCommits({
+                ...context.repo,
+                sha: testedBranch,
+                per_page: testedBranchLookbackCommitCount,
+              });
+              let lastSmokedSha = null;
+              for (const branchCommit of recentBranchCommits) {
+                const { data: branchCommitStatus } = await github.rest.repos.getCombinedStatusForRef({
+                  ...context.repo,
+                  ref: branchCommit.sha,
+                  per_page: statusPageSize,
+                });
+                if (branchCommitStatus.statuses.some((commitStatus) => commitStatus.context === statusContext)) {
+                  lastSmokedSha = branchCommit.sha;
+                  break;
+                }
+              }
+              testedShas = [lastSmokedSha ?? recentBranchCommits[0].sha];
+            } else {
+              // Перший батько merge-коміту — попередній main, решта — те, що влили.
+              testedShas = isMergeCommit ? deployCommit.parents.slice(1).map((parentCommit) => parentCommit.sha) : [deploySha];
+            }
 
             const smokeResults = [];
             for (const testedSha of testedShas) {
@@ -78,7 +117,9 @@ jobs:
 
             const isEverySmokeGreen = smokeResults.every((smokeResult) => smokeResult.smokeState === successState);
             const whatToDoByState = {
-              [missingState]:
+              [missingState]: testedBranch
+                ? `в последних коммитах ${testedBranch} нет smoke на stage — дождитесь деплоя ${testedBranch} и его smoke.`
+                :
                 "этот коммит не проходил smoke на stage. Вливайте в main ветку develop после её деплоя на stage, " +
                 "merge-коммитом (не squash/rebase), либо сначала прогоните этот код через stage.",
               pending: "smoke на stage ещё идёт — дождитесь его и перезапустите этот деплой (Re-run jobs).",
@@ -94,7 +135,15 @@ jobs:
             ]);
             core.summary
               .addHeading(`Гейт прода: ${statusContext}`, 3)
-              .addRaw(`Деплоится ${shortenSha(deploySha)}${isMergeCommit ? " (merge-коммит, проверяются влитые родители)" : ""}`, true)
+              .addRaw(
+                `Деплоится ${shortenSha(deploySha)}` +
+                  (testedBranch
+                    ? ` (проверяется последний smoke ветки ${testedBranch} — то, что сейчас на stage)`
+                    : isMergeCommit
+                      ? " (merge-коммит, проверяются влитые родители)"
+                      : ""),
+                true,
+              )
               .addTable([
                 [
                   { data: "Проверенный коммит", header: true },
