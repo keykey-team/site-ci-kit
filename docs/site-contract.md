@@ -105,6 +105,7 @@ export default {
     createOrderUrlPattern: "**/api/iam/guest-checkout",
     product: { path: "/product/...", optionLabel: null },
     blockedRequestPatterns: [], // необязательно: свои счётчики аналитики сверх типовых
+    isCrmIntegrated: true, // необязательно: false — у сайта нет CRM, на проде проверяется лишь отмена на сайте (06968)
   },
   // Необязательно: известный шум консоли (regex-строки), который сайт пока не исправил.
   // Массив — для всех окружений, объект { stage: [...], prod: [...] } — по окружениям.
@@ -236,6 +237,7 @@ phoneInternational (+380…), phoneNational (0…), email (@example.com), orderC
 
 - `GET api.testOrderReadPath` →
   `{ orderNumber, isTest, isCancelled, itemsTotalAmount, items: [{ sku, quantity, unitPrice }], crm: { orderId, isCancelled } }`.
+  Сайт без CRM отдаёт `crm: null` и ставит в конфиге `testOrder.isCrmIntegrated: false` (06968).
   На проде отдаются только тестовые заказы (остальные — 404), на stage — любые
   (smoke stage сверяет и обычный заказ гостя).
 - `GET api.stockReadPath` → `{ sku, quantity }` — текущий остаток варианта на сайте.
