@@ -21,6 +21,9 @@ test("тестовый заказ не трогает склад и статис
   testOrderToken,
 }) => {
   const isProd = isProdEnvironment(targetEnvironment);
+  // Сайт без CRM (06968, Травниця): testOrder.isCrmIntegrated: false — стан у CRM
+  // не перевіряється, лише скасування на сайті.
+  const isCrmChecked = isProd && siteConfig.testOrder.isCrmIntegrated !== false;
   // На проді — справжній товар із testOrder.product, на stage — товар сиду із
   // залишком, який seed:reset повертає перед кожним smoke.
   const testOrderProduct = isProd ? siteConfig.testOrder.product : siteConfig.testProduct;
@@ -60,15 +63,15 @@ test("тестовый заказ не трогает склад и статис
     const stockQuantityAfterOrder = await readStockQuantity(request, siteConfig, { sku, ...apiReadOptions });
     expect(stockQuantityAfterOrder, "тестовый заказ списал или зарезервировал товар").toBe(stockQuantityBeforeOrder);
   });
-  await test.step("заказ отменён на сайте" + (isProd ? " и в CRM" : ""), async () => {
+  await test.step("заказ отменён на сайте" + (isCrmChecked ? " и в CRM" : ""), async () => {
     await expect
       .poll(
         async () => {
           const { isCancelled, crm } = await readStoredOrder(request, siteConfig, { orderNumber, ...apiReadOptions });
-          return { isCancelled, ...(isProd ? { isSentToCrm: Boolean(crm?.orderId), isCancelledInCrm: crm?.isCancelled } : {}) };
+          return { isCancelled, ...(isCrmChecked ? { isSentToCrm: Boolean(crm?.orderId), isCancelledInCrm: crm?.isCancelled } : {}) };
         },
         { message: "тестовый заказ не отменён", timeout: TEST_ORDER_CRM_SETTLE_TIMEOUT_MS },
       )
-      .toEqual({ isCancelled: true, ...(isProd ? { isSentToCrm: true, isCancelledInCrm: true } : {}) });
+      .toEqual({ isCancelled: true, ...(isCrmChecked ? { isSentToCrm: true, isCancelledInCrm: true } : {}) });
   });
 });
