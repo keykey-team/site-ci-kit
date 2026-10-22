@@ -1,5 +1,11 @@
 // Платіжні провайдери, чию тестову сторінку оплати бібліотека вміє пройти
-// (06649). Сайт називає свого в onlinePaymentScenario.paymentProvider.
+// (06649, LiqPay — 06976). Сайт називає свого в onlinePaymentScenario.paymentProvider.
+import {
+  expectLiqpayPayPage,
+  payLiqpayInvoiceWithTestCard,
+  readLiqpayInvoiceAmountUah,
+  returnFromLiqpayToStore,
+} from "./liqpayTestPayment.mjs";
 import {
   expectMonobankPayPage,
   payMonobankInvoiceWithTestCard,
@@ -14,6 +20,12 @@ const PAYMENT_PROVIDER_PAY_PAGE = Object.freeze({
     readInvoiceAmountUah: readMonobankInvoiceAmountUah,
     payWithTestCard: payMonobankInvoiceWithTestCard,
     returnToStore: returnFromMonobankToStore,
+  }),
+  liqpay: Object.freeze({
+    expectPayPage: expectLiqpayPayPage,
+    readInvoiceAmountUah: readLiqpayInvoiceAmountUah,
+    payWithTestCard: payLiqpayInvoiceWithTestCard,
+    returnToStore: returnFromLiqpayToStore,
   }),
 });
 
