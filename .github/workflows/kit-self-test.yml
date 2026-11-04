@@ -1,0 +1,25 @@
+# Тести самої бібліотеки (07385): планувальник CI (ci/lib) — на кожен PR і
+# push у main. Залежностей немає — лише вбудований node:test.
+name: Kit self-test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  ci-planner:
+    name: ci planner tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - run: node --test ci/tests/*.test.mjs
