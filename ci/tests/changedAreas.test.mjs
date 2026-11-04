@@ -18,8 +18,8 @@ const siteAreasConfig = readSiteAreasConfig({
     },
     client: {
       paths: ["client/**", "shared-test-cases/**"],
-      textOnlyPaths: ["client/public/locales/**"],
-      textOnlyChecks: ["lint", "build"],
+      contentOnlyPaths: ["client/public/locales/**"],
+      contentOnlyChecks: ["lint", "build"],
       jsonFilePaths: ["client/public/locales/**/*.json"],
       install: "npm ci --prefix client",
       checks: { lint: "lint client", unit: "unit client", build: "build client" },
@@ -63,20 +63,20 @@ test("правка только сервера не собирает фронт"
   });
 });
 
-test("только тексты фронта — проверка JSON, линт и сборка, без юнит-тестов", () => {
+test("только контент фронта (тексты, картинки) — проверка JSON, линт и сборка, без юнит-тестов", () => {
   const checksPlan = planFor(["client/public/locales/uk/common.json", "client/public/locales/ru/common.json"]);
   assert.deepEqual(summarizeAreaChecks(checksPlan), { client: ["lint", "build"] });
-  assert.equal(checksPlan.areaPlans[0].isTextOnly, true);
+  assert.equal(checksPlan.areaPlans[0].isContentOnly, true);
   assert.deepEqual(checksPlan.areaPlans[0].jsonFilePathsToValidate, [
     "client/public/locales/uk/common.json",
     "client/public/locales/ru/common.json",
   ]);
 });
 
-test("текст и код фронта вместе — полный набор фронта", () => {
+test("контент и код фронта вместе — полный набор фронта", () => {
   const checksPlan = planFor(["client/public/locales/uk/common.json", "client/src/app.jsx"]);
   assert.deepEqual(summarizeAreaChecks(checksPlan), { client: ["lint", "unit", "build"] });
-  assert.equal(checksPlan.areaPlans[0].isTextOnly, false);
+  assert.equal(checksPlan.areaPlans[0].isContentOnly, false);
 });
 
 test("общие для двух областей файлы запускают обе", () => {
@@ -131,7 +131,7 @@ test("конфиг с ошибками отвергается с перечне�
             paths: [],
             install: "",
             checks: { test: "x" },
-            textOnlyPaths: ["client/locales/**"],
+            contentOnlyPaths: ["client/locales/**"],
           },
         },
       }),
@@ -139,7 +139,7 @@ test("конфиг с ошибками отвергается с перечне�
       assert.match(configError.message, /areas\.client\.paths/);
       assert.match(configError.message, /areas\.client\.install/);
       assert.match(configError.message, /неизвестные проверки test/);
-      assert.match(configError.message, /textOnlyChecks/);
+      assert.match(configError.message, /contentOnlyChecks/);
       return true;
     }
   );

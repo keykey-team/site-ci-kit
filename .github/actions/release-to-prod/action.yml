@@ -1,0 +1,35 @@
+# Автовиливка на прод за міткою PR (07385). Внутрішній action бібліотеки —
+# його викликає release-to-prod.yml тієї ж версії. Код — ci/lib/releaseToProd.mjs.
+name: site-ci release to prod
+description: PR з міткою влитий у stage-гілку — влити її в прод-гілку і запустити деплой прода
+inputs:
+  release-label:
+    description: Метка PR, которая означает «выкатить на прод»
+    required: true
+  stage-branch:
+    description: Ветка stage (куда влит PR)
+    required: true
+  prod-branch:
+    description: Ветка прода
+    required: true
+  deploy-workflow:
+    description: Файл workflow деплоя в .github/workflows сайта
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Release to prod
+      uses: actions/github-script@v9
+      env:
+        KIT_ROOT: ${{ github.action_path }}/../../..
+        RELEASE_LABEL: ${{ inputs.release-label }}
+        STAGE_BRANCH: ${{ inputs.stage-branch }}
+        PROD_BRANCH: ${{ inputs.prod-branch }}
+        DEPLOY_WORKFLOW_FILE: ${{ inputs.deploy-workflow }}
+      with:
+        script: |
+          const { pathToFileURL } = require("node:url");
+          const path = require("node:path");
+          const releaseModuleUrl = pathToFileURL(path.join(process.env.KIT_ROOT, "ci/lib/releaseToProd.mjs")).href;
+          const { releaseToProd } = await import(releaseModuleUrl);
+          await releaseToProd({ github, context, core });

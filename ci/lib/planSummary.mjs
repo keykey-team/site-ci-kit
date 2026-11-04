@@ -26,7 +26,7 @@ export async function writePlanSummary({ core, treeSha, requestedCheckKinds, ear
   const tableRows = checksPlan.areaPlans.map((areaPlan) => [
     areaPlan.areaName,
     areaPlan.checkKinds.join(", ") || "—",
-    areaPlan.isTextOnly ? "только тексты" : "",
+    areaPlan.isContentOnly ? "только контент" : "",
     describeAreaFiles(areaPlan),
   ]);
   if (tableRows.length) {

@@ -12,7 +12,7 @@ function planEveryArea(siteAreasConfig, requestedCheckKinds, everythingReason) {
     areaPlans: siteAreasConfig.areas.map((area) => ({
       areaName: area.areaName,
       changedFilePaths: [],
-      isTextOnly: false,
+      isContentOnly: false,
       jsonFilePathsToValidate: [],
       checkKinds: requestedCheckKinds.filter((checkKind) => area.commandsByCheckKind[checkKind]),
     })),
@@ -22,11 +22,11 @@ function planEveryArea(siteAreasConfig, requestedCheckKinds, everythingReason) {
 }
 
 function selectAreaCheckKinds(area, areaFilePaths, requestedCheckKinds) {
-  const isTextOnlyPath = createPathMatcher(area.textOnlyPaths);
-  const isTextOnly = area.textOnlyPaths.length > 0 && areaFilePaths.every(isTextOnlyPath);
-  const allowedCheckKinds = isTextOnly ? area.textOnlyChecks : Object.keys(area.commandsByCheckKind);
+  const isContentOnlyPath = createPathMatcher(area.contentOnlyPaths);
+  const isContentOnly = area.contentOnlyPaths.length > 0 && areaFilePaths.every(isContentOnlyPath);
+  const allowedCheckKinds = isContentOnly ? area.contentOnlyChecks : Object.keys(area.commandsByCheckKind);
   return {
-    isTextOnly,
+    isContentOnly,
     checkKinds: requestedCheckKinds.filter((checkKind) => allowedCheckKinds.includes(checkKind)),
   };
 }

@@ -38,14 +38,14 @@ function readArea(areaName, areaConfig, problems) {
   );
   if (!Object.keys(commandsByCheckKind).length) areaProblems.push("checks: нет ни одной команды проверки");
 
-  const textOnlyPaths = readOptionalStringList(areaConfig, "textOnlyPaths", areaProblems);
-  const textOnlyChecks = readOptionalStringList(areaConfig, "textOnlyChecks", areaProblems);
-  const unknownTextOnlyChecks = textOnlyChecks.filter((checkKind) => !commandsByCheckKind[checkKind]);
-  if (unknownTextOnlyChecks.length) {
-    areaProblems.push(`textOnlyChecks: у области нет команд ${unknownTextOnlyChecks.join(", ")}`);
+  const contentOnlyPaths = readOptionalStringList(areaConfig, "contentOnlyPaths", areaProblems);
+  const contentOnlyChecks = readOptionalStringList(areaConfig, "contentOnlyChecks", areaProblems);
+  const unknownContentOnlyChecks = contentOnlyChecks.filter((checkKind) => !commandsByCheckKind[checkKind]);
+  if (unknownContentOnlyChecks.length) {
+    areaProblems.push(`contentOnlyChecks: у области нет команд ${unknownContentOnlyChecks.join(", ")}`);
   }
-  if (textOnlyPaths.length && !textOnlyChecks.length) {
-    areaProblems.push("textOnlyChecks: при textOnlyPaths нужно перечислить, какие проверки остаются");
+  if (contentOnlyPaths.length && !contentOnlyChecks.length) {
+    areaProblems.push("contentOnlyChecks: при contentOnlyPaths нужно перечислить, какие проверки остаются");
   }
 
   const jsonFilePaths = readOptionalStringList(areaConfig, "jsonFilePaths", areaProblems);
@@ -59,8 +59,8 @@ function readArea(areaName, areaConfig, problems) {
   return {
     areaName,
     paths: isStringList(areaConfig.paths) ? areaConfig.paths : [],
-    textOnlyPaths,
-    textOnlyChecks,
+    contentOnlyPaths,
+    contentOnlyChecks,
     jsonFilePaths,
     installCommand: areaConfig.install,
     installKeyFiles,
