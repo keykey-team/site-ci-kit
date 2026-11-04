@@ -81,7 +81,7 @@ jobs:
     steps:
       - name: Plan checks
         id: plan
-        uses: keykey-team/site-ci-kit/.github/actions/ci-plan@v3.0.0
+        uses: keykey-team/site-ci-kit/.github/actions/ci-plan@v3.0.1
         with:
           mode: plan
           areas-config: ${{ inputs.areas-config }}
@@ -288,11 +288,14 @@ jobs:
       contains(fromJSON('["success","skipped"]'), needs.build.result) }}
     runs-on: ${{ fromJSON(inputs.runner-labels) }}
     timeout-minutes: 5
+    # Отметка лишь ускоряет следующие прогоны. Не записалась (сбой API GitHub) —
+    # то же дерево проверится ещё раз, а этот прогон и деплой за ним не краснеют.
+    continue-on-error: true
     permissions:
       statuses: write
     steps:
       - name: Record tested tree
-        uses: keykey-team/site-ci-kit/.github/actions/ci-plan@v3.0.0
+        uses: keykey-team/site-ci-kit/.github/actions/ci-plan@v3.0.1
         with:
           mode: record
           record-target-sha: ${{ needs.plan.outputs.record-target-sha }}

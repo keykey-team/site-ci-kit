@@ -27,6 +27,8 @@ runs:
         PROD_BRANCH: ${{ inputs.prod-branch }}
         DEPLOY_WORKFLOW_FILE: ${{ inputs.deploy-workflow }}
       with:
+        # Сбой API GitHub (5xx, обрыв) — повторить, а не ронять проверки или деплой.
+        retries: 3
         script: |
           const { pathToFileURL } = require("node:url");
           const path = require("node:path");

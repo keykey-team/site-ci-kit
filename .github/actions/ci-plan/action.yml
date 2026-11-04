@@ -57,6 +57,8 @@ runs:
         AREAS_CONFIG_PATH: ${{ inputs.areas-config }}
         REQUESTED_CHECKS: ${{ inputs.checks }}
       with:
+        # Сбой API GitHub (5xx, обрыв) — повторить, а не ронять проверки или деплой.
+        retries: 3
         script: |
           const { pathToFileURL } = require("node:url");
           const path = require("node:path");
@@ -72,6 +74,8 @@ runs:
         RECORD_TARGET_SHA: ${{ inputs.record-target-sha }}
         RECORD_DESCRIPTION: ${{ inputs.record-description }}
       with:
+        # Сбой API GitHub (5xx, обрыв) — повторить, а не ронять проверки или деплой.
+        retries: 3
         script: |
           const { pathToFileURL } = require("node:url");
           const path = require("node:path");
