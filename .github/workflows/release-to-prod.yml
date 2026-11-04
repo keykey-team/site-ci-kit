@@ -54,7 +54,7 @@ jobs:
       issues: write
     steps:
       - name: Release to prod
-        uses: keykey-team/site-ci-kit/.github/actions/release-to-prod@feature/07385-ci-skip-unchanged-and-tested
+        uses: keykey-team/site-ci-kit/.github/actions/release-to-prod@v3.0.0
         with:
           release-label: ${{ inputs.release-label }}
           stage-branch: ${{ inputs.stage-branch }}

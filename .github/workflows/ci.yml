@@ -81,7 +81,7 @@ jobs:
     steps:
       - name: Plan checks
         id: plan
-        uses: keykey-team/site-ci-kit/.github/actions/ci-plan@feature/07385-ci-skip-unchanged-and-tested
+        uses: keykey-team/site-ci-kit/.github/actions/ci-plan@v3.0.0
         with:
           mode: plan
           areas-config: ${{ inputs.areas-config }}
@@ -292,7 +292,7 @@ jobs:
       statuses: write
     steps:
       - name: Record tested tree
-        uses: keykey-team/site-ci-kit/.github/actions/ci-plan@feature/07385-ci-skip-unchanged-and-tested
+        uses: keykey-team/site-ci-kit/.github/actions/ci-plan@v3.0.0
         with:
           mode: record
           record-target-sha: ${{ needs.plan.outputs.record-target-sha }}
