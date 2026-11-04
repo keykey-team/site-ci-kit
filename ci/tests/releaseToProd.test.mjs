@@ -58,6 +58,16 @@ function createFakeGithub({ labels = ["в прод"], unreleasedCommits, pullReq
   return github;
 }
 
+test("merge-коммит без своего кода (main → develop) чужим не считается, коммит чужой ветки — считается", () => {
+  const backMergeCommit = { ...createCommit("back-merge", "Merge main into develop"), parents: [{ sha: "d" }, { sha: "m" }] };
+  const foreignCommits = findForeignUnreleasedCommits({
+    unreleasedCommits: [backMergeCommit, createCommit("a"), createCommit("other-feature"), createCommit("develop-merge")],
+    pullRequestCommitShas: ["a"],
+    mergeCommitSha: "develop-merge",
+  });
+  assert.deepEqual(foreignCommits.map((foreignCommit) => foreignCommit.sha), ["other-feature"]);
+});
+
 test("чужим считается всё невыпущенное, кроме коммитов PR и его merge-коммита", () => {
   const foreignCommits = findForeignUnreleasedCommits({
     unreleasedCommits: [createCommit("a"), createCommit("b"), createCommit("develop-merge"), createCommit("x")],

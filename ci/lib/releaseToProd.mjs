@@ -15,9 +15,14 @@ import {
 } from "../config/releaseToProd.config.mjs";
 import { findPullRequestMergedAs } from "./mergedPullRequest.mjs";
 
+// Чужое невыпущенное — обычные коммиты не из этого PR. Merge-коммиты сами по
+// себе не в счёт: «Merge main into develop» нового кода не несёт, а коммиты,
+// которые приносит слияние чужой ветки, сами есть в списке и будут найдены.
 export function findForeignUnreleasedCommits({ unreleasedCommits, pullRequestCommitShas, mergeCommitSha }) {
   const ownCommitShas = new Set([...pullRequestCommitShas, mergeCommitSha]);
-  return unreleasedCommits.filter((unreleasedCommit) => !ownCommitShas.has(unreleasedCommit.sha));
+  return unreleasedCommits.filter(
+    (unreleasedCommit) => !ownCommitShas.has(unreleasedCommit.sha) && (unreleasedCommit.parents?.length ?? 1) < 2
+  );
 }
 
 function formatCommitLine(unreleasedCommit) {
