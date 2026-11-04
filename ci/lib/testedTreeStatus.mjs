@@ -8,6 +8,7 @@ import {
   TESTED_TREE_DESCRIPTION_SEPARATOR,
   TESTED_TREE_STATUS_CONTEXT,
 } from "../config/ciPlan.config.mjs";
+import { findPullRequestMergedAs } from "./mergedPullRequest.mjs";
 
 const TREE_SHA_PATTERN = /^[0-9a-f]{40}$/;
 
@@ -32,19 +33,22 @@ export function isTestedTreeStatusSufficient({ commitStatus, treeSha, requiredCh
 // Коммиты, на которых может лежать отметка для этого дерева:
 //   — сам коммит (перезапуск);
 //   — голова PR (так CI ставит отметку на pull_request, а слияние этого PR в
-//     develop или main даёт новый коммит с тем же деревом);
+//     develop или main даёт новый коммит с тем же деревом); на push — голова
+//     PR, слиянием которого коммит появился (в том числе squash);
 //   — второй и дальше родители merge-коммита (develop, влитый в main без PR).
-export async function listTestedTreeCandidateShas({ github, repository, commitSha, pullRequestHeadSha }) {
+export async function listTestedTreeCandidateShas({ github, repository, commitSha, pullRequestHeadSha, branchName }) {
   const candidateShas = [commitSha];
   if (pullRequestHeadSha) candidateShas.push(pullRequestHeadSha);
 
-  const { data: associatedPullRequests } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
-    ...repository,
-    commit_sha: commitSha,
-  });
-  associatedPullRequests
-    .filter((pullRequest) => pullRequest.merge_commit_sha === commitSha)
-    .forEach((pullRequest) => candidateShas.push(pullRequest.head.sha));
+  if (!pullRequestHeadSha) {
+    const mergedPullRequest = await findPullRequestMergedAs({
+      github,
+      repository,
+      mergeCommitSha: commitSha,
+      baseBranch: branchName,
+    });
+    if (mergedPullRequest) candidateShas.push(mergedPullRequest.head.sha);
+  }
 
   const { data: commit } = await github.rest.git.getCommit({ ...repository, commit_sha: commitSha });
   commit.parents.slice(1).forEach((parent) => candidateShas.push(parent.sha));

@@ -24,24 +24,23 @@ function createFakeCore() {
   return fakeCore;
 }
 
-function createFakeGithub({ labels = ["в прод"], unreleasedCommits, pullRequestCommits, mergeError = null }) {
+function createFakeGithub({ labels = ["в прод"], unreleasedCommits, pullRequestCommits, mergeError = null, isMergedPullRequestOnlyInClosedList = false }) {
   const calls = { merges: [], dispatches: [], comments: [] };
+  const mergedPullRequest = {
+    number: 42,
+    title: "fix(cart): keep size (#07385)",
+    merge_commit_sha: "develop-merge",
+    base: { ref: "develop" },
+    head: { sha: "feature-head" },
+    labels: labels.map((name) => ({ name })),
+  };
   const github = {
     calls,
     paginate: async () => pullRequestCommits,
     rest: {
       repos: {
-        listPullRequestsAssociatedWithCommit: async () => ({
-          data: [
-            {
-              number: 42,
-              title: "fix(cart): keep size (#07385)",
-              merge_commit_sha: "develop-merge",
-              base: { ref: "develop" },
-              labels: labels.map((name) => ({ name })),
-            },
-          ],
-        }),
+        // Для develop (не ветка по умолчанию) GitHub отдаёт только открытые PR.
+        listPullRequestsAssociatedWithCommit: async () => ({ data: isMergedPullRequestOnlyInClosedList ? [] : [mergedPullRequest] }),
         compareCommitsWithBasehead: async () => ({
           data: { ahead_by: unreleasedCommits.length, commits: unreleasedCommits },
         }),
@@ -51,7 +50,7 @@ function createFakeGithub({ labels = ["в прод"], unreleasedCommits, pullReq
           return { status: 201, data: { sha: "main-merge-sha" } };
         },
       },
-      pulls: { listCommits: () => {} },
+      pulls: { listCommits: () => {}, list: async () => ({ data: [mergedPullRequest] }) },
       actions: { createWorkflowDispatch: async (dispatchRequest) => calls.dispatches.push(dispatchRequest) },
       issues: { createComment: async (commentRequest) => calls.comments.push(commentRequest) },
     },
@@ -116,4 +115,16 @@ test("конфликт слияния — прод не трогается, пр
   assert.equal(github.calls.dispatches.length, 0);
   assert.match(github.calls.comments[0].body, /конфликт слияния/);
   assert.equal(core.failures.length, 1);
+});
+
+test("слитый PR находится и тогда, когда GitHub не связывает его с коммитом develop", async () => {
+  const github = createFakeGithub({
+    unreleasedCommits: [createCommit("develop-merge")],
+    pullRequestCommits: [],
+    isMergedPullRequestOnlyInClosedList: true,
+  });
+  const core = createFakeCore();
+  await releaseToProd({ github, context, core });
+  assert.equal(github.calls.merges.length, 1);
+  assert.equal(github.calls.dispatches.length, 1);
 });

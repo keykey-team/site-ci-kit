@@ -24,13 +24,14 @@ function createTestedStatus(treeSha, satisfiedCheckKinds, overrides = {}) {
   };
 }
 
-function createFakeGithub({ statusesBySha = {}, associatedPullRequests = [], parents = [] }) {
+function createFakeGithub({ statusesBySha = {}, associatedPullRequests = [], recentlyClosedPullRequests = [], parents = [] }) {
   return {
     rest: {
       repos: {
         listCommitStatusesForRef: async ({ ref }) => ({ data: statusesBySha[ref] ?? [] }),
         listPullRequestsAssociatedWithCommit: async () => ({ data: associatedPullRequests }),
       },
+      pulls: { list: async () => ({ data: recentlyClosedPullRequests }) },
       git: { getCommit: async () => ({ data: { parents } }) },
     },
   };
@@ -61,16 +62,36 @@ test("отметка годится, только если дерево то ж�
   assert.ok(!isTestedTreeStatusSufficient({ commitStatus: foreignStatus, treeSha: TREE_SHA, requiredCheckKinds: ["unit"] }));
 });
 
-test("кандидаты: сам коммит, голова PR, голова слитого PR и второй родитель merge-коммита", async () => {
+test("кандидаты на PR: сам коммит (merge ref) и голова PR", async () => {
+  const github = createFakeGithub({ parents: [{ sha: "base-tip" }, { sha: "pr-head" }] });
+  const candidateShas = await listTestedTreeCandidateShas({ github, repository, commitSha: "merge-ref", pullRequestHeadSha: "pr-head" });
+  assert.deepEqual(candidateShas, ["merge-ref", "pr-head"]);
+});
+
+test("кандидаты на push в main: голова слитого PR и второй родитель merge-коммита", async () => {
   const github = createFakeGithub({
     associatedPullRequests: [
-      { merge_commit_sha: "merge", head: { sha: "feature-head" } },
-      { merge_commit_sha: "unrelated", head: { sha: "other-head" } },
+      { merge_commit_sha: "merge", base: { ref: "main" }, head: { sha: "develop-tip" } },
+      { merge_commit_sha: "unrelated", base: { ref: "main" }, head: { sha: "other-head" } },
     ],
     parents: [{ sha: "main-before" }, { sha: "develop-tip" }],
   });
-  const candidateShas = await listTestedTreeCandidateShas({ github, repository, commitSha: "merge", pullRequestHeadSha: "pr-head" });
-  assert.deepEqual(candidateShas, ["merge", "pr-head", "feature-head", "develop-tip"]);
+  const candidateShas = await listTestedTreeCandidateShas({ github, repository, commitSha: "merge", branchName: "main" });
+  assert.deepEqual(candidateShas, ["merge", "develop-tip"]);
+});
+
+test("кандидаты на push в develop: слитый PR находится среди недавно закрытых, даже squash без второго родителя", async () => {
+  // Для коммита не из ветки по умолчанию GitHub отдаёт только открытые PR.
+  const github = createFakeGithub({
+    associatedPullRequests: [],
+    recentlyClosedPullRequests: [
+      { merge_commit_sha: "older-merge", head: { sha: "older-head" } },
+      { merge_commit_sha: "squash-merge", head: { sha: "feature-head" } },
+    ],
+    parents: [{ sha: "develop-before" }],
+  });
+  const candidateShas = await listTestedTreeCandidateShas({ github, repository, commitSha: "squash-merge", branchName: "develop" });
+  assert.deepEqual(candidateShas, ["squash-merge", "feature-head"]);
 });
 
 test("поиск находит отметку на первом подходящем кандидате", async () => {

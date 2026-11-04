@@ -84,6 +84,7 @@ async function findEarlierTestOfTree({ github, core, repository, context, treeSh
       repository,
       commitSha: context.sha,
       pullRequestHeadSha: context.payload.pull_request?.head?.sha,
+      branchName: context.ref?.startsWith("refs/heads/") ? context.ref.slice("refs/heads/".length) : undefined,
     });
     return await findTestedTreeStatus({ github, repository, candidateShas, treeSha, requiredCheckKinds: requestedCheckKinds });
   } catch (lookupError) {

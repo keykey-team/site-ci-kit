@@ -13,6 +13,7 @@ import {
   MERGE_NOTHING_TO_MERGE_STATUS,
   PULL_REQUEST_COMMITS_PAGE_SIZE,
 } from "../config/releaseToProd.config.mjs";
+import { findPullRequestMergedAs } from "./mergedPullRequest.mjs";
 
 export function findForeignUnreleasedCommits({ unreleasedCommits, pullRequestCommitShas, mergeCommitSha }) {
   const ownCommitShas = new Set([...pullRequestCommitShas, mergeCommitSha]);
@@ -22,18 +23,6 @@ export function findForeignUnreleasedCommits({ unreleasedCommits, pullRequestCom
 function formatCommitLine(unreleasedCommit) {
   const commitTitle = unreleasedCommit.commit.message.split("\n")[0];
   return `- \`${unreleasedCommit.sha.slice(0, 8)}\` ${commitTitle}`;
-}
-
-async function findMergedPullRequest({ github, repository, mergeCommitSha, stageBranch }) {
-  const { data: associatedPullRequests } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
-    ...repository,
-    commit_sha: mergeCommitSha,
-  });
-  return (
-    associatedPullRequests.find(
-      (pullRequest) => pullRequest.merge_commit_sha === mergeCommitSha && pullRequest.base.ref === stageBranch
-    ) ?? null
-  );
 }
 
 async function commentOnPullRequest({ github, repository, pullRequestNumber, commentBody }) {
@@ -60,7 +49,7 @@ export async function releaseToProd({ github, context, core }) {
   const deployWorkflowFile = process.env.DEPLOY_WORKFLOW_FILE;
   const mergeCommitSha = context.sha;
 
-  const pullRequest = await findMergedPullRequest({ github, repository, mergeCommitSha, stageBranch });
+  const pullRequest = await findPullRequestMergedAs({ github, repository, mergeCommitSha, baseBranch: stageBranch });
   if (!pullRequest) {
     core.info(`Коммит ${mergeCommitSha} пришёл в ${stageBranch} не слиянием PR — автовыкатки нет.`);
     return;

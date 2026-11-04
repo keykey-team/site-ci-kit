@@ -24,6 +24,11 @@ export const COMPARE_FILES_LIMIT = 300;
 export const PULL_REQUEST_FILES_PAGE_SIZE = 100;
 export const PULL_REQUEST_FILES_LIMIT = 3000;
 
+// Сколько недавно закрытых PR ветки просматривать в поиске PR, слиянием
+// которого появился коммит (ci/lib/mergedPullRequest.mjs): слитый только что —
+// среди первых по времени изменения, 30 — запас на одновременные слияния.
+export const RECENTLY_CLOSED_PULL_REQUESTS_PAGE_SIZE = 30;
+
 // SHA «коммита до push» у новой ветки — одни нули.
 export const EMPTY_COMMIT_SHA_PATTERN = /^0+$/;
 
