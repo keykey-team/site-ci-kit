@@ -144,3 +144,9 @@ test("конфиг с ошибками отвергается с перечне�
     }
   );
 });
+
+test("пример конфига из examples/ проходит проверку формата", async () => {
+  const { default: exampleConfig } = await import("../../examples/site-ci-areas.config.mjs");
+  const exampleAreasConfig = readSiteAreasConfig(exampleConfig);
+  assert.deepEqual(exampleAreasConfig.areas.map((area) => area.areaName), ["server", "client"]);
+});

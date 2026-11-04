@@ -11,25 +11,32 @@
 ## Как устроено
 
 ```
-push / PR ──► ci.yml: lint │ unit │ integration (параллельно, ≤ 10 мин)
-                 └─► обязательные проверки ветки develop: PR с красной проверкой не влить
+PR ──► ci.yml: plan ──► lint │ unit │ integration │ build ──► record
+         plan: какие области сайта затронуты (areas-config) и не проверялось ли
+               уже ровно это дерево файлов (статус site-ci/tested-tree);
+               ненужные джобы пропускаются — GitHub засчитывает их как пройденные
+         record: отметка «это дерево проверено»
 
-push develop ──► деплой stage ──► smoke.yml (stage) ──► статус коммита stage-smoke
-push main ─────► deploy-gate.yml: stage-smoke влитого коммита = success?
-                     ├─ нет ──► деплой прода не начинается (ручной обход — с причиной)
-                     └─ да ───► деплой прода ──► smoke.yml (prod, только @prod-safe)
+push develop / main ──► ci.yml (checks: unit integration) — то, что PR не проверил
+                    ──► деплой ──► smoke.yml (stage — весь набор; prod — @prod-safe)
+PR в develop с меткой «в прод» ──► release-to-prod.yml: develop → main ──► деплой прода
 ```
+
+Гейта «прод только после зелёного smoke stage» с v3 нет (07385): прод не
+ждёт stage. Smoke и регрессия stage — сигнал (статус коммита, алерт сайта).
 
 | Что | Где |
 |---|---|
-| CI: lint, unit, integration | `.github/workflows/ci.yml` |
+| CI: план по областям, lint, unit, integration, build, отметка «проверено» | `.github/workflows/ci.yml`, `ci/lib/` |
+| Правила планировщика и автовыкатки (имя статуса, лимиты API) | `ci/config/*.config.mjs` |
+| Автовыкатка на прод по метке PR | `.github/workflows/release-to-prod.yml`, `ci/lib/releaseToProd.mjs` |
 | Smoke/E2E после деплоя, статус `stage-smoke`, HTML-отчёт | `.github/workflows/smoke.yml` |
-| Гейт прода по `stage-smoke` | `.github/workflows/deploy-gate.yml` |
 | Сценарии Playwright (общие для всех сайтов) | `e2e/tests/` |
 | Загрузка и проверка конфига/адаптера сайта, фикстуры, подмена API Новой почты, фейковый покупатель | `e2e/lib/` |
 | Правила запуска: таймауты, теги, повторы, пути отчёта | `e2e/config/*.config.mjs` |
 | Что сайт обязан предоставить | `docs/site-contract.md` |
-| Шаблоны для сайта | `examples/site-e2e/`, `examples/caller-workflows/` |
+| Шаблоны для сайта | `examples/site-e2e/`, `examples/caller-workflows/`, `examples/site-ci-areas.config.mjs` |
+| Тесты самой библиотеки (планировщик, автовыкатка) | `ci/tests/` — `node --test ci/tests/*.test.mjs` |
 
 ## Подключение нового сайта
 
@@ -51,49 +58,56 @@ push main ─────► deploy-gate.yml: stage-smoke влитого ком�
 Формат и смысл каждого поля — `docs/site-contract.md` §3. Стенд stage (флаги
 `ORDER_DISPATCH_ENABLED=0`, `E2E_TEST_LOGIN_ENABLED`, сид) — §4.
 
-### 2. CI на push и PR
+### 2. CI на PR
 
-Скопируйте `examples/caller-workflows/ci.yml` в `.github/workflows/ci.yml` сайта
-и укажите свои команды:
+1. Скопируйте `examples/site-ci-areas.config.mjs` в `.github/site-ci-areas.config.mjs`
+   сайта и опишите области: какие пути к ним относятся, как ставить
+   зависимости и какие команды у проверок (формат — `docs/site-contract.md` §1).
+2. Скопируйте `examples/caller-workflows/ci.yml` в `.github/workflows/ci.yml`.
 
-| Input | Обязателен | По умолчанию | Что это |
-|---|---|---|---|
-| `install-command` | да | — | установка зависимостей (в каждом из трёх джобов) |
-| `lint-command` | да | — | линтер; база для «только изменённые файлы» — `$LINT_BASE_REF` |
-| `unit-command` | да | — | тесты без БД и сети |
-| `integration-command` | да | — | тесты с mongodb-memory-server / supertest |
-| `node-version` | нет | `22` | версия Node |
-| `cache-dependency-path` | нет | `**/package-lock.json` | lock-файлы для кэша npm |
-| `timeout-minutes` | нет | `10` | предел каждого джоба (джобы параллельны) |
-| `runner-labels` | нет | `["ubuntu-latest"]` | JSON-метки раннера; `["self-hosted","rosteria"]`, если у владельца кончились минуты GitHub-hosted |
+Inputs `ci.yml`:
+
+| Input | По умолчанию | Что это |
+|---|---|---|
+| `areas-config` | `.github/site-ci-areas.config.mjs` | конфиг областей сайта |
+| `checks` | `lint unit integration build` | какие проверки нужны этому вызову; деплой передаёт `unit integration` |
+| `node-version` | `22` | версия Node |
+| `cache-dependency-path` | `**/package-lock.json` | lock-файлы для кэша npm (только на раннерах GitHub) |
+| `timeout-minutes` | `10` | предел каждого джоба (джобы параллельны) |
+| `runner-labels` | `["ubuntu-latest"]` | JSON-метки раннера; свой раннер — например `["sana-tests"]` |
+
+Вызывающему джобу нужны `permissions: contents: read, statuses: write,
+pull-requests: read` (отметка «проверено» и поиск PR коммита).
 
 `LINT_BASE_REF`: в PR — `origin/<базовая ветка>`, на push — коммит до push
 (для новой ветки или после force-push — `HEAD~1`). Бинарники MongoDB для
 integration кэшируются (`~/.cache/mongodb-binaries`), в lint и unit их загрузка
-отключена.
+отключена. На своём раннере `node_modules` остаются между запусками: установка
+пропускается, пока не поменялись `installKeyFiles` области (lock-файлы),
+команда установки или версия Node.
 
-### 3. Smoke и гейт в деплое
+### 3. Проверки, smoke и автовыкатка в деплое
 
-Возьмите из `examples/caller-workflows/deploy.yml` три джоба и встройте в свой
-`deploy.yml`, не трогая сборку и сам деплой:
+Возьмите из `examples/caller-workflows/deploy.yml` джобы и встройте в свой `deploy.yml`:
 
-- `deploy-gate` — только для `main`, перед деплоем; `permissions: contents: read, statuses: read`;
+- `checks` — `ci.yml` с `checks: unit integration` перед деплоем: слитый PR с тем же
+  деревом файлов уже проверен, и тогда джоб занимает секунды;
 - `smoke-stage` — после деплоя `develop`, `target-env: stage`;
-- `smoke-prod` — после деплоя `main`, `target-env: prod`.
+- `smoke-prod` — после деплоя `main`, `target-env: prod`;
+- по желанию `release-to-prod` — после `checks` на `develop`: PR с меткой «в прод»
+  сразу уезжает на прод (§2 контракта). Деплою тогда нужен `workflow_dispatch`.
 
 Обоим smoke нужны `permissions: contents: read, statuses: write` (workflow
 объявляет `statuses: write`, без этого GitHub не запустит вызов даже для прода).
+`release-to-prod` — `contents: write, actions: write, pull-requests: write, issues: write`.
 Секреты передаются **явно** (`secrets: inherit` не работает между разными
 владельцами, например `pucha02/rosteria` → `keykey-team/site-ci-kit`).
 
 Inputs `smoke.yml`: `target-env` (обязателен), `site-e2e-dir` (`e2e`),
-`kit-ref` (`v2` — держите равным версии в `uses: ...@v2`), `grep` (`@smoke`),
-`status-context` (`stage-smoke`), `runner-labels`.
-Inputs `deploy-gate.yml`: `status-context` (`stage-smoke`), `override-reason` (`""`),
-`runner-labels`.
-
-Добавьте в `on.workflow_dispatch.inputs` деплоя `gate-override-reason`
-(как в примере) — это ручной обход гейта.
+`kit-ref` (держите равным версии в `uses: ...@<версия>`), `grep` (`@smoke`),
+`status-context` (`stage-smoke`), `runner-labels`, `browsers`.
+Inputs `release-to-prod.yml`: `release-label` (`в прод`), `stage-branch` (`develop`),
+`prod-branch` (`main`), `deploy-workflow` (`deploy.yml`), `runner-labels`.
 
 ### 4. Секреты (Settings → Secrets and variables → Actions → New repository secret)
 
@@ -136,11 +150,11 @@ actions and reusable workflows», добавьте в список разреш�
 rule → Branch name pattern `develop` → Require a pull request before merging +
 Require status checks to pass before merging → найти и отметить три проверки.
 
-**main** — такой же ruleset с паттерном `main`. По желанию в Require status
-checks добавьте `stage-smoke`: тогда PR develop → main нельзя влить, пока smoke
-на stage не зелёный (раньше, чем сработает гейт деплоя). Hotfix-PR прямо в main
-при этом тоже ждут `stage-smoke` — проводите их через stage или обходите
-правилом из Bypass list.
+**main** — такой же ruleset с паттерном `main`, если не нужна автовыкатка по
+метке. С `release-to-prod.yml` main **нельзя** закрывать требованием PR или
+проверок: develop в main вливает токен GitHub Actions, а он эти правила не
+обходит (Restrict deletions и Block force pushes — можно). `stage-smoke` в
+обязательные проверки не добавляйте: с v3 прод его не ждёт.
 
 > Правила веток в **приватном** репозитории работают только на платных планах
 > (GitHub Team для организации, GitHub Pro для личного аккаунта). На Free GitHub
@@ -149,10 +163,13 @@ checks добавьте `stage-smoke`: тогда PR develop → main нельз
 ### 7. Проверить, что всё работает
 
 1. PR в develop с ошибкой линта → проверка `ci / lint` красная, Merge недоступен.
-2. Push в develop → после деплоя в запуске Deploy есть джоб `smoke-stage / smoke (stage)`,
-   в его сводке — счётчики и ссылка на отчёт, на коммите — статус `stage-smoke`.
-3. Merge develop → main → джоб `deploy-gate / stage-smoke gate` зелёный, затем деплой и
-   `smoke-prod / smoke (prod)`.
+2. PR, который меняет только фронт → в сводке джоба `plan` область client, джоб
+   `ci / integration` пропущен (skipped), Merge доступен.
+3. Слияние этого PR → в деплое develop джобы `checks / unit` и `checks / integration`
+   пропущены: в сводке `plan` — «Это дерево уже проверено».
+4. После деплоя develop — `smoke-stage / smoke (stage)`, на коммите статус `stage-smoke`.
+5. PR develop → main сразу после этого — проверки тоже пропущены; после слияния —
+   деплой и `smoke-prod / smoke (prod)`.
 
 ## Обязательные проверки — точные имена
 
@@ -160,26 +177,27 @@ checks добавьте `stage-smoke`: тогда PR develop → main нельз
 
 | Ветка | Проверки |
 |---|---|
-| develop | `ci / lint`, `ci / unit`, `ci / integration` |
-| main (по желанию) | `ci / lint`, `ci / unit`, `ci / integration`, `stage-smoke` |
+| develop, main | `ci / lint`, `ci / unit`, `ci / integration` (по желанию `ci / build`) |
 
 Имя — `<id или name джоба в ci.yml сайта> / <джоб здесь>`. Переименовали джоб
 сайта — обновите правила, иначе GitHub будет вечно ждать проверку со старым именем.
+Пропущенный как ненужный джоб (`skipped`) GitHub засчитывает как пройденный.
+Упал `plan` — все джобы проверок запускаются и краснеют с объяснением: молча
+пропустить проверки нельзя.
 
-## Гейт прода
+## Отметка «дерево проверено»
 
-- Деплой `main` вызывает `deploy-gate.yml`. Он берёт коммит, который деплоится:
-  если это merge-коммит — проверяет его влитых родителей (голову develop, которую
-  деплоили на stage), иначе — сам коммит.
-- Проходит, только если у проверяемого коммита статус `stage-smoke = success`.
-  `pending` — smoke ещё идёт; `failure` — тесты красные; `error` — smoke не
-  запустился; нет статуса — коммит на stage не проверялся. Что делать в каждом
-  случае, гейт пишет в ошибке и в сводке.
-- **develop вливается в main merge-коммитом** («Create a merge commit»). При
-  squash/rebase получается новый коммит без статуса — гейт его не пустит.
-- **Ручной обход**: Actions → Deploy → Run workflow → ветка `main` →
-  `gate-override-reason` = причина. Гейт пропустит деплой, а в сводке и
-  предупреждениях запуска останутся автор, причина и какой smoke был не зелёным.
+- После зелёных проверок джоб `record` ставит статус `site-ci/tested-tree` с
+  описанием `tree <sha дерева git> · <проверки>`: на PR — на голову PR, на push —
+  на сам коммит.
+- `plan` следующего прогона ищет такую отметку с тем же деревом на коммите, на
+  голове PR, на голове слитого PR и на втором родителе merge-коммита. Нашёл —
+  все проверки пропускаются, отметка переносится на новый коммит.
+- Дерево одинаково у проверки PR и у его слияния, только если между ними в
+  базовую ветку ничего не влили. Влили — дерево другое, и деплой проверяет
+  затронутые области сам.
+- Отметку ставит только workflow токеном с `statuses: write`; код сайта из PR
+  этого токена не получает.
 
 ## Тесты
 
@@ -283,8 +301,9 @@ npx playwright test
 
 ## Версии
 
-- Сайты ссылаются на мажорный тег: `uses: keykey-team/site-ci-kit/.github/workflows/ci.yml@v2`
-  и `kit-ref: v2` в `smoke.yml` (версия сценариев).
+- Сайты ссылаются на точный тег: `uses: keykey-team/site-ci-kit/.github/workflows/ci.yml@v3.0.0`
+  и `kit-ref` той же версии в `smoke.yml` (версия сценариев). Мажорный `v2`
+  остался у сайтов, которые ещё на нём.
 - `v2` (06641): тестовый заказ на проде, проверки суммы корзины, заказа в базе,
   кабинета, отзыва токена, списка заказов в админке и консоли браузера. Новые
   обязательные поля `api.*`, `testOrder.*` и функции адаптера — §3 и §5
@@ -320,6 +339,14 @@ npx playwright test
   «отменён в CRM». Без поля — как раньше (CRM проверяется).
 - `v2.6.0` (06976, Травниця): провайдер `liqpay` для онлайн-оплаты (§10) —
   тестовая (sandbox) страница LiqPay. Сайты с monobank ничего не меняют.
+- `v3.0.0` (07385): **несовместимо с v2 для CI.** `ci.yml` вместо четырёх
+  команд берёт конфиг областей сайта (`areas-config`, §1), гоняет только
+  затронутые области, новый джоб `build`, пропускает уже проверенное дерево
+  файлов; вызывающему джобу нужны `statuses: write` и `pull-requests: read`.
+  `deploy-gate.yml` удалён (гейта stage-smoke больше нет). Новый
+  `release-to-prod.yml` — автовыкатка по метке PR. `smoke.yml` не менялся.
+  Внутренние actions (`.github/actions/*`) вызываются из workflow по той же
+  версии — при выпуске новой версии обновите в них `@v3.x.y`.
 - Несовместимые (новое обязательное поле конфига, новая функция адаптера, смена
   имён джобов или проверок) — следующий мажорный тег (`v3`); сайты переходят на
   него сами, обновив `e2e/`, `@v3` и `kit-ref: v3`.

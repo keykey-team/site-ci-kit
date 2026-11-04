@@ -1,23 +1,19 @@
-# Приклад .github/workflows/deploy.yml у репозиторії сайту (06638): деплой
-# зі smoke після stage і гейтом перед продом.
+# Приклад .github/workflows/deploy.yml у репозиторії сайту (06638; v3 — 07385).
 #
-#   push develop → deploy на stage → smoke stage (статус stage-smoke на коміті)
-#   push main    → deploy-gate (stage-smoke того коміту = success?) → deploy
-#                  на прод → smoke prod (лише @prod-safe)
+#   push develop → checks (лише те, чого PR не перевіряв) → deploy на stage →
+#                  smoke stage (статус stage-smoke — сигнал, не замок)
+#                  └─ PR з міткою «в прод» → release-to-prod: develop → main
+#   push main    → checks → deploy на прод → smoke prod (лише @prod-safe)
 #
-# Власні job збірки/тестів сайту (build gate тощо) лишаються як були — додайте
-# їх у needs у deploy.
+# Гейту stage-smoke з v3 немає: прод не чекає stage.
 name: Deploy
 
 on:
   push:
     branches: [develop, main]
-  workflow_dispatch:
-    inputs:
-      gate-override-reason:
-        description: "Деплой main без зелёного stage-smoke: причина (пусто — гейт работает)"
-        type: string
-        default: ""
+  # Потрібен release-to-prod: злиття токеном GitHub Actions push не породжує,
+  # тож деплой main він запускає сам.
+  workflow_dispatch: {}
 
 concurrency:
   group: deploy-${{ github.ref_name }}
@@ -27,41 +23,48 @@ permissions:
   contents: read
 
 jobs:
-  deploy-gate:
-    if: github.ref_name == 'main'
-    uses: keykey-team/site-ci-kit/.github/workflows/deploy-gate.yml@v2
+  # Те саме дерево файлів, що пройшло CI в PR, тут не перевіряється вдруге.
+  checks:
+    uses: keykey-team/site-ci-kit/.github/workflows/ci.yml@v3.0.0
     permissions:
       contents: read
-      statuses: read
+      statuses: write
+      pull-requests: read
     with:
-      # На push inputs порожні — гейт працює; заповнюється лише з Run workflow.
-      override-reason: ${{ inputs.gate-override-reason || '' }}
+      checks: unit integration
 
   deploy:
-    needs: deploy-gate
-    # develop: гейт пропущено (skipped) — деплоїмо; main: лише після успіху гейту.
-    if: >-
-      !cancelled() && (
-        (github.ref_name == 'develop' && needs.deploy-gate.result == 'skipped') ||
-        (github.ref_name == 'main' && needs.deploy-gate.result == 'success')
-      )
+    needs: checks
+    if: ${{ !cancelled() && needs.checks.result == 'success' }}
     runs-on: self-hosted
     timeout-minutes: 40
     steps:
       - name: Deploy
         run: bash scripts/deploy.sh   # деплой сайту як зараз (Sana, Rosteria — свій)
 
+  # Необов'язково: PR із міткою «в прод», влитий у develop, одразу йде на прод
+  # (якщо в develop немає нічого, крім нього). Прод-гілка без обов'язкових PR і перевірок.
+  release-to-prod:
+    needs: checks
+    if: ${{ !cancelled() && github.ref_name == 'develop' && github.event_name == 'push' && needs.checks.result == 'success' }}
+    uses: keykey-team/site-ci-kit/.github/workflows/release-to-prod.yml@v3.0.0
+    permissions:
+      contents: write
+      actions: write
+      pull-requests: write
+      issues: write
+
   smoke-stage:
     needs: deploy
     if: github.ref_name == 'develop'
-    uses: keykey-team/site-ci-kit/.github/workflows/smoke.yml@v2
+    uses: keykey-team/site-ci-kit/.github/workflows/smoke.yml@v3.0.0
     # statuses: write — smoke ставить коміту статус stage-smoke.
     permissions:
       contents: read
       statuses: write
     with:
       target-env: stage
-      kit-ref: v2
+      kit-ref: v3.0.0
     # secrets: inherit не працює між різними власниками (pucha02 → keykey-team),
     # тому секрети передаються явно.
     secrets:
@@ -77,7 +80,7 @@ jobs:
   smoke-prod:
     needs: deploy
     if: github.ref_name == 'main'
-    uses: keykey-team/site-ci-kit/.github/workflows/smoke.yml@v2
+    uses: keykey-team/site-ci-kit/.github/workflows/smoke.yml@v3.0.0
     # smoke.yml оголошує statuses: write (для stage); без цього дозволу тут
     # GitHub не запустить виклик навіть для проду.
     permissions:
@@ -85,7 +88,7 @@ jobs:
       statuses: write
     with:
       target-env: prod
-      kit-ref: v2
+      kit-ref: v3.0.0
     # Прод відкритий, тести із записом туди не йдуть — крім тестового
     # замовлення (06641), якому потрібен TEST_ORDER_TOKEN сервера проду.
     secrets:
