@@ -1,53 +1,58 @@
-# Спільний CI сайтів (06638): lint, unit, integration паралельно на кожен push і PR.
-# Підключення в репозиторії сайту — один job:
+# Спільний CI сайтів (06638; v3 — 07385). Перевіряє лише те, чого торкнулася
+# правка, і не перевіряє вдруге те саме дерево файлів.
 #
-#   jobs:
-#     ci:
-#       uses: keykey-team/site-ci-kit/.github/workflows/ci.yml@v2
-#       with: { install-command: ..., lint-command: ..., unit-command: ..., integration-command: ... }
+#   plan ──► lint │ unit │ integration │ build ──► record
 #
-# Імена перевірок у PR: «ci / lint», «ci / unit», «ci / integration» (ім'я
-# job сайту + ім'я job тут). Саме їх роблять обов'язковими в правилах develop.
-# Повний приклад — examples/caller-workflows/ci.yml, контракт — docs/site-contract.md §1.
+# plan — за конфігом областей сайту (areas-config, docs/site-contract.md §1)
+#        вирішує, які області змінено і які їхні перевірки потрібні; якщо це
+#        дерево файлів уже перевірене (статус site-ci/tested-tree) — нічого.
+# Джоб без роботи пропускається (skipped): GitHub зараховує пропущений джоб
+# як пройдену обов'язкову перевірку, тож «ci / lint» і т.д. у правилах гілки
+# не зависають. Упав сам plan — джоби запускаються і падають з поясненням:
+# мовчки пропустити перевірки не можна.
+# record — після зелених перевірок ставить відмітку «дерево перевірене».
+#
+# Той самий workflow викликає і деплой сайту (checks: "unit integration"):
+# на злитті вже перевіреного PR він нічого не запускає.
+#
+# Підключення — examples/caller-workflows/ci.yml, контракт — docs/site-contract.md §1.
 name: Site CI
 
 on:
   workflow_call:
     inputs:
+      areas-config:
+        description: Конфиг областей сайта (ES-модуль без импортов) в его репозитории
+        type: string
+        default: .github/site-ci-areas.config.mjs
+      checks:
+        description: 'Проверки этого вызова через пробел: lint unit integration build. Деплой — "unit integration"'
+        type: string
+        default: lint unit integration build
       node-version:
         description: Версия Node.js (та же, что на сервере сайта и локально)
         type: string
         default: "22"
-      install-command:
-        description: Установка зависимостей (выполняется в каждом из трёх джобов)
-        type: string
-        required: true
-      lint-command:
-        description: Линтер. База сравнения для «только изменённые файлы» — в env LINT_BASE_REF
-        type: string
-        required: true
-      unit-command:
-        description: Тесты без БД и сети
-        type: string
-        required: true
-      integration-command:
-        description: Тесты с mongodb-memory-server / supertest
-        type: string
-        required: true
       cache-dependency-path:
-        description: Lock-файлы для кэша npm в setup-node (glob, можно несколько строк)
+        description: Lock-файлы для кэша npm на раннерах GitHub (на своём раннере кэш npm и так на диске)
         type: string
         default: "**/package-lock.json"
       timeout-minutes:
-        description: Предел на каждый джоб; джобы параллельны, так что это и предел всего прогона
+        description: Предел каждого джоба проверок; джобы параллельны
         type: number
         default: 10
       runner-labels:
-        description: 'JSON-метки раннера: ["ubuntu-latest"] или ["self-hosted","rosteria"] для сайта без минут GitHub-hosted'
+        description: 'JSON-метки раннера: ["ubuntu-latest"] или ["sana-tests"] для своего раннера'
         type: string
         default: '["ubuntu-latest"]'
+    outputs:
+      is-tested-before:
+        description: '"true" — это дерево файлов уже проверялось, проверки пропущены'
+        value: ${{ jobs.plan.outputs.is-tested-before }}
 
-# Код лише читається: жоден крок не пише в репозиторій, статуси чи релізи.
+# Код лише читається. statuses: write — тільки джобу record; pull-requests:
+# read — plan шукає PR, яким прийшов коміт. Той, хто викликає, мусить видати
+# contents: read, statuses: write, pull-requests: read.
 permissions:
   contents: read
 
@@ -57,25 +62,68 @@ defaults:
     shell: bash
 
 jobs:
+  plan:
+    name: plan
+    runs-on: ${{ fromJSON(inputs.runner-labels) }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      statuses: read
+      pull-requests: read
+    outputs:
+      lint-script: ${{ steps.plan.outputs.lint-script }}
+      unit-script: ${{ steps.plan.outputs.unit-script }}
+      integration-script: ${{ steps.plan.outputs.integration-script }}
+      build-script: ${{ steps.plan.outputs.build-script }}
+      is-tested-before: ${{ steps.plan.outputs.is-tested-before }}
+      record-target-sha: ${{ steps.plan.outputs.record-target-sha }}
+      record-description: ${{ steps.plan.outputs.record-description }}
+    steps:
+      - name: Plan checks
+        id: plan
+        uses: keykey-team/site-ci-kit/.github/actions/ci-plan@v3.0.1
+        with:
+          mode: plan
+          areas-config: ${{ inputs.areas-config }}
+          checks: ${{ inputs.checks }}
+
   lint:
     name: lint
+    needs: plan
+    if: ${{ !cancelled() && (needs.plan.result != 'success' || needs.plan.outputs.lint-script != '') }}
     runs-on: ${{ fromJSON(inputs.runner-labels) }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     env:
       # Лінту бінарник MongoDB не потрібен: без цього postinstall
       # mongodb-memory-server качав би ~100 МБ у кожному прогоні.
       MONGOMS_DISABLE_POSTINSTALL: "1"
+      CHECK_SCRIPT: ${{ needs.plan.outputs.lint-script }}
     steps:
+      - name: Stop if planning failed
+        if: needs.plan.result != 'success'
+        run: |
+          echo "::error::Планировщик проверок упал — lint не запускался. Причина — в логе джоба plan."
+          exit 1
+
       - uses: actions/checkout@v7
         with:
           # Повна історія: lint-command порівнює змінені файли з базовою гілкою.
           fetch-depth: 0
           persist-credentials: false
+          # node_modules з минулого запуску на своєму раннері лишаються (крок нижче).
+          clean: false
+
+      # Чистий робочий каталог, крім node_modules: свій раннер не ставить
+      # залежності вдруге, якщо lock-файли не змінились (мітка в node_modules).
+      - name: Clean workspace except node_modules
+        run: git clean -ffdx -e node_modules
 
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ inputs.node-version }}
-          cache: npm
+          # Кеш npm у сховищі GitHub — лише на його раннерах: на своєму
+          # ~/.npm і так на диску, а відновлення з мережі довше за npm ci.
+          cache: ${{ runner.environment == 'github-hosted' && 'npm' || '' }}
           cache-dependency-path: ${{ inputs.cache-dependency-path }}
 
       # LINT_BASE_REF — з чим порівнювати змінені файли. Проєкт з накопиченим
@@ -109,77 +157,80 @@ jobs:
           echo "LINT_BASE_REF=$lint_base_ref" >> "$GITHUB_ENV"
           echo "LINT_BASE_REF=$lint_base_ref"
 
-      - name: Install dependencies
-        run: ${{ inputs.install-command }}
-
       - name: Lint
-        run: ${{ inputs.lint-command }}
-
-      - name: Summary
-        if: always()
-        env:
-          CHECK_NAME: lint
-          CHECK_COMMAND: ${{ inputs.lint-command }}
-          CHECK_STATUS: ${{ job.status }}
-        run: |
-          printf -- "- **%s** — %s · \`%s\` · база сравнения: \`%s\`\n" \
-            "$CHECK_NAME" "$CHECK_STATUS" "$CHECK_COMMAND" "${LINT_BASE_REF:-не определена}" >> "$GITHUB_STEP_SUMMARY"
+        run: bash -c "$CHECK_SCRIPT"
 
   unit:
     name: unit
+    needs: plan
+    if: ${{ !cancelled() && (needs.plan.result != 'success' || needs.plan.outputs.unit-script != '') }}
     runs-on: ${{ fromJSON(inputs.runner-labels) }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     env:
       # Unit-тести не ходять у БД — бінарник MongoDB їм не потрібен.
       MONGOMS_DISABLE_POSTINSTALL: "1"
+      CHECK_SCRIPT: ${{ needs.plan.outputs.unit-script }}
     steps:
+      - name: Stop if planning failed
+        if: needs.plan.result != 'success'
+        run: |
+          echo "::error::Планировщик проверок упал — unit не запускался. Причина — в логе джоба plan."
+          exit 1
+
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+          clean: false
+
+      - name: Clean workspace except node_modules
+        run: git clean -ffdx -e node_modules
 
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ inputs.node-version }}
-          cache: npm
+          cache: ${{ runner.environment == 'github-hosted' && 'npm' || '' }}
           cache-dependency-path: ${{ inputs.cache-dependency-path }}
 
-      - name: Install dependencies
-        run: ${{ inputs.install-command }}
-
       - name: Unit tests
-        run: ${{ inputs.unit-command }}
-
-      - name: Summary
-        if: always()
-        env:
-          CHECK_NAME: unit
-          CHECK_COMMAND: ${{ inputs.unit-command }}
-          CHECK_STATUS: ${{ job.status }}
-        run: |
-          printf -- "- **%s** — %s · \`%s\`\n" "$CHECK_NAME" "$CHECK_STATUS" "$CHECK_COMMAND" >> "$GITHUB_STEP_SUMMARY"
+        run: bash -c "$CHECK_SCRIPT"
 
   integration:
     name: integration
+    needs: plan
+    if: ${{ !cancelled() && (needs.plan.result != 'success' || needs.plan.outputs.integration-script != '') }}
     runs-on: ${{ fromJSON(inputs.runner-labels) }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
+    env:
+      CHECK_SCRIPT: ${{ needs.plan.outputs.integration-script }}
     steps:
+      - name: Stop if planning failed
+        if: needs.plan.result != 'success'
+        run: |
+          echo "::error::Планировщик проверок упал — integration не запускался. Причина — в логе джоба plan."
+          exit 1
+
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+          clean: false
+
+      - name: Clean workspace except node_modules
+        run: git clean -ffdx -e node_modules
 
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ inputs.node-version }}
-          cache: npm
+          cache: ${{ runner.environment == 'github-hosted' && 'npm' || '' }}
           cache-dependency-path: ${{ inputs.cache-dependency-path }}
 
       # Бінарник MongoDB для mongodb-memory-server (~100 МБ) — з кешу, а не з
-      # fastdl.mongodb.org щоразу: так швидше і не залежить від їхнього CDN.
-      # Каталог задаємо явно, бо типовий у різних версіях пакета різний.
+      # fastdl.mongodb.org щоразу. Каталог задаємо явно, бо типовий у різних
+      # версіях пакета різний; на своєму раннері він і так лишається на диску.
       - name: Point mongodb-memory-server to cached binaries
         run: echo "MONGOMS_DOWNLOAD_DIR=$HOME/.cache/mongodb-binaries" >> "$GITHUB_ENV"
 
       - uses: actions/cache@v6
+        if: runner.environment == 'github-hosted'
         with:
           path: ~/.cache/mongodb-binaries
           # Версію бінарника визначає версія mongodb-memory-server у lock-файлі.
@@ -187,17 +238,65 @@ jobs:
           restore-keys: |
             mongodb-binaries-${{ runner.os }}-
 
-      - name: Install dependencies
-        run: ${{ inputs.install-command }}
-
       - name: Integration tests
-        run: ${{ inputs.integration-command }}
+        run: bash -c "$CHECK_SCRIPT"
 
-      - name: Summary
-        if: always()
-        env:
-          CHECK_NAME: integration
-          CHECK_COMMAND: ${{ inputs.integration-command }}
-          CHECK_STATUS: ${{ job.status }}
+  build:
+    name: build
+    needs: plan
+    if: ${{ !cancelled() && (needs.plan.result != 'success' || needs.plan.outputs.build-script != '') }}
+    runs-on: ${{ fromJSON(inputs.runner-labels) }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    env:
+      MONGOMS_DISABLE_POSTINSTALL: "1"
+      CHECK_SCRIPT: ${{ needs.plan.outputs.build-script }}
+    steps:
+      - name: Stop if planning failed
+        if: needs.plan.result != 'success'
         run: |
-          printf -- "- **%s** — %s · \`%s\`\n" "$CHECK_NAME" "$CHECK_STATUS" "$CHECK_COMMAND" >> "$GITHUB_STEP_SUMMARY"
+          echo "::error::Планировщик проверок упал — build не запускался. Причина — в логе джоба plan."
+          exit 1
+
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          clean: false
+
+      # .next лишається: next build сам чистить вихід, а кеш у .next/cache
+      # пришвидшує повторну збірку.
+      - name: Clean workspace except node_modules and Next cache
+        run: git clean -ffdx -e node_modules -e .next
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: ${{ runner.environment == 'github-hosted' && 'npm' || '' }}
+          cache-dependency-path: ${{ inputs.cache-dependency-path }}
+
+      - name: Build
+        run: bash -c "$CHECK_SCRIPT"
+
+  record:
+    name: record
+    needs: [plan, lint, unit, integration, build]
+    # Лише коли кожна перевірка або пройшла, або була не потрібна.
+    if: >-
+      ${{ !cancelled() && needs.plan.result == 'success' &&
+      contains(fromJSON('["success","skipped"]'), needs.lint.result) &&
+      contains(fromJSON('["success","skipped"]'), needs.unit.result) &&
+      contains(fromJSON('["success","skipped"]'), needs.integration.result) &&
+      contains(fromJSON('["success","skipped"]'), needs.build.result) }}
+    runs-on: ${{ fromJSON(inputs.runner-labels) }}
+    timeout-minutes: 5
+    # Отметка лишь ускоряет следующие прогоны. Не записалась (сбой API GitHub) —
+    # то же дерево проверится ещё раз, а этот прогон и деплой за ним не краснеют.
+    continue-on-error: true
+    permissions:
+      statuses: write
+    steps:
+      - name: Record tested tree
+        uses: keykey-team/site-ci-kit/.github/actions/ci-plan@v3.0.1
+        with:
+          mode: record
+          record-target-sha: ${{ needs.plan.outputs.record-target-sha }}
+          record-description: ${{ needs.plan.outputs.record-description }}

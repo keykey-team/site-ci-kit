@@ -1,59 +1,93 @@
-# Контракт сайта для site-ci-kit (06638 / 06639 / 06640 / 06641)
+# Контракт сайта для site-ci-kit (06638 / 06639 / 06640 / 06641 / 07385)
 
-Что репозиторий сайта обязан иметь, чтобы подключить общий CI, гейт деплоя и
+Что репозиторий сайта обязан иметь, чтобы подключить общий CI, автовыкатку и
 библиотеку smoke/E2E-тестов. Всё, что отличается между сайтами (команды,
 URL, селекторы), живёт в репозитории сайта; общий код — здесь.
 
-## 1. CI: команды сайта
+## 1. CI: области сайта (v3, 07385)
 
-Сайт отдаёт команды, шаблон `ci.yml` их только запускает (inputs):
+Сайт описывает свои области в ES-модуле `.github/site-ci-areas.config.mjs`
+(input `areas-config`). **Без импортов**: CI читает файл через API GitHub, не
+клонируя репозиторий. Пример — `examples/site-ci-areas.config.mjs`.
 
-| Input | Пример (Sana) | Что делает |
-|---|---|---|
-| `lint-command` | `npm run lint:changed --prefix server && npm run lint:changed --prefix client` | Линтер. Должен проходить на текущем коде: если в проекте накоплен долг, проверяются только файлы, изменённые относительно базовой ветки (`LINT_BASE_REF` в env). |
-| `unit-command` | `npm run test:unit --prefix server` | Тесты без БД и сети. |
-| `integration-command` | `npm run test:integration --prefix server` | Тесты с mongodb-memory-server / supertest. |
-| `install-command` | `npm ci --prefix server` | Установка зависимостей для трёх джобов. |
+```js
+export default {
+  runEverythingPaths: [".github/**", "scripts/**"], // правка здесь — запускается всё
+  ignoredPaths: ["docs/**", "**/*.md", "e2e/**"],     // правка здесь — ничего
+  areas: {
+    server: {
+      paths: ["server/**"],
+      install: "npm ci --prefix server",
+      installKeyFiles: ["server/package-lock.json"],   // необязательно
+      installedDirectories: ["server/node_modules"],   // необязательно
+      checks: { lint: "…", unit: "…", integration: "…" },
+    },
+    client: {
+      paths: ["client/**"],
+      contentOnlyPaths: ["client/public/**"],          // необязательно
+      contentOnlyChecks: ["lint", "build"],
+      jsonFilePaths: ["client/public/locales/**/*.json"], // необязательно
+      install: "npm ci --prefix client",
+      checks: { lint: "…", unit: "…", build: "…" },
+    },
+  },
+};
+```
 
-Необязательные inputs: `node-version` (по умолчанию `22`), `cache-dependency-path`
-(lock-файлы для кэша npm, по умолчанию `**/package-lock.json`), `timeout-minutes`
-(по умолчанию 10), `runner-labels` (JSON-метки раннера, по умолчанию
-`["ubuntu-latest"]`; для сайта без минут GitHub-hosted — например
-`["self-hosted","rosteria"]`; есть и у `smoke.yml`, и у `deploy-gate.yml`).
+| Поле | Что значит |
+|---|---|
+| `areas.<имя>.paths` | шаблоны путей области (`**` — любая глубина, `*` — внутри имени). Путь может входить в несколько областей — тогда идут все |
+| `install` | установка зависимостей области; выполняется в каждом джобе, где есть проверка этой области (одинаковая команда двух областей — один раз) |
+| `installKeyFiles`, `installedDirectories` | на своём раннере `node_modules` остаются между запусками; если хэш `installKeyFiles` + команда + версия Node совпал с меткой в каждом из `installedDirectories` — установка пропускается |
+| `checks.lint/unit/integration/build` | команды проверок; нет команды — у области нет такой проверки. В `lint` доступен `$LINT_BASE_REF` |
+| `contentOnlyPaths` + `contentOnlyChecks` | если все изменённые файлы области — из `contentOnlyPaths` (тексты, картинки), идут только `contentOnlyChecks` |
+| `jsonFilePaths` | изменённые файлы по этим шаблонам `lint` проверяет как строгий JSON |
+| `runEverythingPaths` | правка здесь (сборка, CI) — все проверки всех областей |
+| `ignoredPaths` | правка здесь не запускает ничего |
 
-Три джоба `lint`, `unit`, `integration` идут параллельно, у каждого
-`timeout-minutes` ≤ 10. Имена проверок в PR: `<имя вызывающего джоба> / lint` и т.д.
-(при джобе `ci`, как в `examples/caller-workflows/ci.yml`, — `ci / lint`,
-`ci / unit`, `ci / integration`) — их и делают обязательными в правилах ветки `develop`.
+Файл, не попавший ни в одну область и ни в один список, запускает **всё**: новый
+каталог не должен тихо остаться без проверок. Так же — если список изменённых
+файлов неизвестен (новая ветка, больше 300 файлов в сравнении).
 
-## 2. Smoke после деплоя на stage и гейт прода
+Джобы `lint`, `unit`, `integration`, `build` идут параллельно; джоб без работы
+пропускается (`skipped`) — GitHub засчитывает его как пройденную обязательную
+проверку. Имена проверок в PR: `<имя вызывающего джоба> / lint` и т.д. (при
+джобе `ci` — `ci / lint`, `ci / unit`, `ci / integration`, `ci / build`).
+
+**Отметка «дерево проверено».** После зелёных проверок джоб `record` ставит
+статус `site-ci/tested-tree` (`tree <sha дерева> · <проверки>`) на голову PR
+(или на коммит при push). Следующий прогон того же дерева — слияние PR,
+PR develop → main, деплой — находит отметку и ничего не запускает. Поэтому деплой
+сайта вызывает `ci.yml` с `checks: unit integration`: он проверяет только то,
+что PR не покрыл (между проверкой и слиянием в ветку влили другой PR, прямой push).
+
+Права вызывающего джоба: `contents: read, statuses: write, pull-requests: read`.
+
+## 2. Smoke после деплоя и автовыкатка на прод
 
 - После деплоя `develop` на stage сайт вызывает `smoke.yml` (`target-env: stage`).
   Тот ставит коммиту статус **`stage-smoke`**: `pending` в начале, в конце
-  `success` / `failure` (тесты) или `error` (smoke не запустился: установка,
-  неполный конфиг сайта) — и кладёт HTML-отчёт Playwright в артефакт
-  `site-smoke-report-<env>`, ссылку — в сводку запуска.
-- Деплой `main` на прод сначала вызывает `deploy-gate.yml`: он ищет коммит,
-  который проверялся на stage (для merge-коммита develop→main — второй
-  родитель, иначе сам коммит), и пропускает деплой только при `stage-smoke = success`.
-  Поэтому develop вливается в main **merge-коммитом** (не squash/rebase: у
-  нового коммита статуса нет). Ручной обход — `workflow_dispatch` с непустым
-  `gate-override-reason` (причина и автор пишутся в сводку).
-- **Режим `tested-branch` (06967)** — для сайта, где задачи едут в main не
-  слиянием develop (в develop бывает невыпущенный код), и коммит прода сам на
-  stage не проверялся. С `tested-branch: develop` гейт берёт последний коммит
-  этой ветки со статусом `stage-smoke` (коммиты только с документацией деплой не
-  запускают — их пропускает) и пускает прод лишь при `success`. Красный или ещё
-  идущий smoke stage — прод стоит. Пример — Травниця.
+  `success` / `failure` (тесты) или `error` (smoke не запустился) — и кладёт
+  HTML-отчёт Playwright в артефакт `site-smoke-report-<env>`, ссылку — в сводку.
+  С v3 это **сигнал, а не замок**: деплой прода его не ждёт (гейт
+  `deploy-gate.yml` удалён). Красный smoke stage — алерт сайта.
 - После деплоя на прод — `smoke.yml` с `target-env: prod`: только тесты с тегом
   `@prod-safe` (ничего не пишут: страницы, SEO, фильтр) и тестовый заказ
   `@test-order` (§5: сайт помечает его `isTest`, склад и статистика не меняются,
   в CRM он сразу отменяется).
-- Права вызывающих джобов: `smoke.yml` — `contents: read, statuses: write`
-  (и для prod: workflow объявляет `statuses: write`, без него вызов не стартует);
-  `deploy-gate.yml` — `contents: read, statuses: read`. Секреты в `smoke.yml`
-  передаются явно: `secrets: inherit` не работает между разными владельцами
-  (`pucha02/rosteria` → `keykey-team/site-ci-kit`).
+- **Автовыкатка по метке** (`release-to-prod.yml`, необязательно). Деплой
+  stage-ветки вызывает его после `checks`. Если коммит — слияние PR в develop
+  и у PR метка `release-label` («в прод»), develop вливается в main
+  merge-коммитом и запускается `deploy-workflow` на main (`workflow_dispatch`:
+  слияние токеном GitHub Actions push-событий не порождает). Условия: в develop
+  нет ни одного невыпущенного коммита, кроме коммитов этого PR, и нет
+  конфликта. Иначе — комментарий в PR с причиной и красный джоб; прод не тронут.
+  Прод-ветка не должна требовать PR или проверок для push: токен Actions их не
+  обходит. Права: `contents: write, actions: write, pull-requests: write, issues: write`.
+- Права вызывающих джобов `smoke.yml` — `contents: read, statuses: write`
+  (и для prod: workflow объявляет `statuses: write`, без него вызов не стартует).
+  Секреты в `smoke.yml` передаются явно: `secrets: inherit` не работает между
+  разными владельцами (`pucha02/rosteria` → `keykey-team/site-ci-kit`).
 
 Исключить тест из прогона можно через `grep`: значение подставляется внутрь
 lookahead, поэтому `@smoke(?!.*@test-order)` берёт всё `@smoke`, кроме тестового
@@ -250,7 +284,7 @@ phoneInternational (+380…), phoneNational (0…), email (@example.com), orderC
 ## 6. Регрессия каталога (необязательно, 06646)
 
 Подробные сценарии каталога второго приоритета: тег `@regression`, только
-stage (опираются на товары сида), в `@smoke` и в гейт прода не входят. Сайт
+stage (опираются на товары сида), в `@smoke` не входят. Сайт
 подключает их, добавив блок `catalogScenario` в `site.config.mjs` и функции
 ниже в `site.adapter.mjs`. Сайт без блока или без функций эти тесты
 **пропускает** с пояснением в отчёте — остальное не меняется.
@@ -290,8 +324,8 @@ catalogScenario: {
 | `expectCatalogEmptyState(page)` | Проверяет, что вместо товаров видно сообщение «ничего не найдено». |
 | `resetCatalogFilters(page)` | Сбрасывает фильтры из этого сообщения. |
 
-Запуск — отдельным вызовом `smoke.yml` со своим статусом коммита, чтобы
-результат регрессии не влиял на гейт прода (он смотрит на `stage-smoke`):
+Запуск — отдельным вызовом `smoke.yml` со своим статусом коммита `stage-regression`
+(отдельно от `stage-smoke`):
 
 ```yaml
 regression-stage:
@@ -455,7 +489,7 @@ payment: { isPaid, totalToPayAmount, discountAmount }
 
 ## 11. Заказ с доставкой Укрпоштой (необязательно, 06967)
 
-Тест `ukrposhtaCheckout.spec.mjs`, тег **`@smoke`** (входит в гейт прода), только
+Тест `ukrposhtaCheckout.spec.mjs`, тег **`@smoke`** (входит в smoke stage), только
 stage: тот же путь гостя, что §3 с Новой почтой, но отделение Укрпошты; заказ
 сверяется в базе через `api.testOrderReadPath` (§5). Сайт без блока
 `ukrposhtaCheckoutScenario` или без функции адаптера тест **пропускает**.

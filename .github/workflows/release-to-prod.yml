@@ -1,0 +1,62 @@
+# Автовиливка на прод за міткою PR (07385). Викликається з деплою stage-гілки
+# сайту після його перевірок:
+#
+#   PR із міткою «в прод» влито в develop → develop вливається в main
+#   merge-комітом → запускається деплой main (workflow_dispatch).
+#
+# Лише якщо в develop немає нічого, крім комітів цього PR, і немає конфлікту.
+# Інакше — коментар у PR з причиною і червоний джоб (алерт сайту): прод не
+# зачеплено, вливати звичайним PR. Без мітки — нічого не робить.
+#
+# Прод-гілка не повинна вимагати PR чи обов'язкових перевірок для push:
+# токен GitHub Actions їх не обходить (Sana, Rosteria — так і є).
+# Приклад — examples/caller-workflows/deploy.yml, контракт — docs/site-contract.md §2.
+name: Release to prod
+
+on:
+  workflow_call:
+    inputs:
+      release-label:
+        description: Метка PR, которая означает «выкатить на прод»
+        type: string
+        default: в прод
+      stage-branch:
+        description: Ветка stage
+        type: string
+        default: develop
+      prod-branch:
+        description: Ветка прода
+        type: string
+        default: main
+      deploy-workflow:
+        description: Файл workflow деплоя сайта (запускается на прод-ветке)
+        type: string
+        default: deploy.yml
+      runner-labels:
+        description: 'JSON-метки раннера: ["ubuntu-latest"] или ["sana-tests"]'
+        type: string
+        default: '["ubuntu-latest"]'
+
+# contents: write — слияние веток; actions: write — запуск деплоя прода;
+# pull-requests и issues: write — комментарий в PR.
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: release to prod
+    runs-on: ${{ fromJSON(inputs.runner-labels) }}
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      actions: write
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Release to prod
+        uses: keykey-team/site-ci-kit/.github/actions/release-to-prod@v3.0.1
+        with:
+          release-label: ${{ inputs.release-label }}
+          stage-branch: ${{ inputs.stage-branch }}
+          prod-branch: ${{ inputs.prod-branch }}
+          deploy-workflow: ${{ inputs.deploy-workflow }}

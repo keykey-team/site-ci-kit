@@ -1,0 +1,84 @@
+# Планировщик и отметка «дерево проверено» для ci.yml (07385). Внутренний
+# action библиотеки: сайты его не вызывают, его вызывает ci.yml той же версии.
+# Код — ci/lib/planCiRun.mjs и ci/lib/recordTestedTree.mjs (весь репозиторий
+# библиотеки скачивается вместе с action, поэтому путь — от корня).
+name: site-ci plan
+description: Какие проверки нужны этой правке и проверялось ли уже это дерево файлов
+inputs:
+  mode:
+    description: "plan — составить план; record — поставить отметку «дерево проверено»"
+    required: true
+  areas-config:
+    description: Путь к конфигу областей в репозитории сайта (только для plan)
+    default: ""
+  checks:
+    description: Проверки этого запуска через пробел (только для plan)
+    default: ""
+  record-target-sha:
+    description: Коммит для отметки (только для record, из outputs plan)
+    default: ""
+  record-description:
+    description: Описание отметки (только для record, из outputs plan)
+    default: ""
+outputs:
+  lint-script:
+    description: Скрипт джоба lint (пусто — джоб пропускается)
+    value: ${{ steps.plan.outputs.lint-script }}
+  unit-script:
+    description: Скрипт джоба unit
+    value: ${{ steps.plan.outputs.unit-script }}
+  integration-script:
+    description: Скрипт джоба integration
+    value: ${{ steps.plan.outputs.integration-script }}
+  build-script:
+    description: Скрипт джоба build
+    value: ${{ steps.plan.outputs.build-script }}
+  tree-sha:
+    description: Дерево файлов проверяемого коммита
+    value: ${{ steps.plan.outputs.tree-sha }}
+  is-tested-before:
+    description: '"true" — это дерево уже проверено, проверки пропущены'
+    value: ${{ steps.plan.outputs.is-tested-before }}
+  record-target-sha:
+    description: Куда ставить отметку после зелёных проверок
+    value: ${{ steps.plan.outputs.record-target-sha }}
+  record-description:
+    description: Текст отметки
+    value: ${{ steps.plan.outputs.record-description }}
+runs:
+  using: composite
+  steps:
+    - name: Plan checks
+      id: plan
+      if: inputs.mode == 'plan'
+      uses: actions/github-script@v9
+      env:
+        KIT_ROOT: ${{ github.action_path }}/../../..
+        AREAS_CONFIG_PATH: ${{ inputs.areas-config }}
+        REQUESTED_CHECKS: ${{ inputs.checks }}
+      with:
+        # Сбой API GitHub (5xx, обрыв) — повторить, а не ронять проверки или деплой.
+        retries: 3
+        script: |
+          const { pathToFileURL } = require("node:url");
+          const path = require("node:path");
+          const planModuleUrl = pathToFileURL(path.join(process.env.KIT_ROOT, "ci/lib/planCiRun.mjs")).href;
+          const { planCiRun } = await import(planModuleUrl);
+          await planCiRun({ github, context, core });
+
+    - name: Record tested tree
+      if: inputs.mode == 'record'
+      uses: actions/github-script@v9
+      env:
+        KIT_ROOT: ${{ github.action_path }}/../../..
+        RECORD_TARGET_SHA: ${{ inputs.record-target-sha }}
+        RECORD_DESCRIPTION: ${{ inputs.record-description }}
+      with:
+        # Сбой API GitHub (5xx, обрыв) — повторить, а не ронять проверки или деплой.
+        retries: 3
+        script: |
+          const { pathToFileURL } = require("node:url");
+          const path = require("node:path");
+          const recordModuleUrl = pathToFileURL(path.join(process.env.KIT_ROOT, "ci/lib/recordTestedTree.mjs")).href;
+          const { recordTestedTree } = await import(recordModuleUrl);
+          await recordTestedTree({ github, context, core });
