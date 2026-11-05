@@ -45,6 +45,12 @@ on:
         description: 'JSON-метки раннера: ["ubuntu-latest"] или ["sana-tests"] для своего раннера'
         type: string
         default: '["ubuntu-latest"]'
+      control-runner-labels:
+        description: >-
+          JSON-метки раннера для plan и record (пусто — как runner-labels). Только для деплоя:
+          plan исполняет конфиг областей из проверяемого коммита, а в PR это код PR
+        type: string
+        default: ""
     outputs:
       is-tested-before:
         description: '"true" — это дерево файлов уже проверялось, проверки пропущены'
@@ -64,7 +70,9 @@ defaults:
 jobs:
   plan:
     name: plan
-    runs-on: ${{ fromJSON(inputs.runner-labels) }}
+    # Деплой ставит сюда свой раннер (control-runner-labels): иначе секундный plan
+    # ждёт, пока раннеры проверок освободятся от CI чужих PR (07385).
+    runs-on: ${{ fromJSON(inputs.control-runner-labels || inputs.runner-labels) }}
     timeout-minutes: 5
     permissions:
       contents: read
@@ -81,7 +89,7 @@ jobs:
     steps:
       - name: Plan checks
         id: plan
-        uses: keykey-team/site-ci-kit/.github/actions/ci-plan@v3.0.1
+        uses: keykey-team/site-ci-kit/.github/actions/ci-plan@v3.1.0
         with:
           mode: plan
           areas-config: ${{ inputs.areas-config }}
@@ -286,7 +294,7 @@ jobs:
       contains(fromJSON('["success","skipped"]'), needs.unit.result) &&
       contains(fromJSON('["success","skipped"]'), needs.integration.result) &&
       contains(fromJSON('["success","skipped"]'), needs.build.result) }}
-    runs-on: ${{ fromJSON(inputs.runner-labels) }}
+    runs-on: ${{ fromJSON(inputs.control-runner-labels || inputs.runner-labels) }}
     timeout-minutes: 5
     # Отметка лишь ускоряет следующие прогоны. Не записалась (сбой API GitHub) —
     # то же дерево проверится ещё раз, а этот прогон и деплой за ним не краснеют.
@@ -295,7 +303,7 @@ jobs:
       statuses: write
     steps:
       - name: Record tested tree
-        uses: keykey-team/site-ci-kit/.github/actions/ci-plan@v3.0.1
+        uses: keykey-team/site-ci-kit/.github/actions/ci-plan@v3.1.0
         with:
           mode: record
           record-target-sha: ${{ needs.plan.outputs.record-target-sha }}
