@@ -11,7 +11,9 @@ function readFieldByPath(sourceObject, fieldPath) {
   return fieldPath.split(".").reduce((parentObject, fieldName) => parentObject?.[fieldName], sourceObject);
 }
 
-const isFilledField = (fieldValue) => fieldValue !== undefined && fieldValue !== null && fieldValue !== "";
+// Порожній список (наприклад, deliveryOptions: []) — те саме, що незаповнене поле.
+const isFilledField = (fieldValue) =>
+  Array.isArray(fieldValue) ? fieldValue.length > 0 : fieldValue !== undefined && fieldValue !== null && fieldValue !== "";
 
 /**
  * Чому сценарій на цьому сайті запустити не можна; null — можна.
