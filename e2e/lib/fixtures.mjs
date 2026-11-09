@@ -141,6 +141,9 @@ export const test = playwrightTest.extend({
   onlinePaymentScenario: createOptionalScenarioFixture(OPTIONAL_SCENARIO_CONTRACT.onlinePayment),
   // Замовлення з доставкою Укрпоштою (06967).
   ukrposhtaCheckoutScenario: createOptionalScenarioFixture(OPTIONAL_SCENARIO_CONTRACT.ukrposhtaCheckout),
+  // Інші способи доставки й замовлення з особистого кабінету (07427).
+  deliveryOptionsCheckoutScenario: createOptionalScenarioFixture(OPTIONAL_SCENARIO_CONTRACT.deliveryOptionsCheckout),
+  customerAccountOrderScenario: createOptionalScenarioFixture(OPTIONAL_SCENARIO_CONTRACT.customerAccountOrder),
 
   // Вкладка покупця без входу в окремому браузерному контексті: поки в
   // основній вкладці працює адмін, вітрину дивимось так, як її бачить

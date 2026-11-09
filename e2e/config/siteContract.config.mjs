@@ -181,6 +181,28 @@ export const OPTIONAL_SCENARIO_CONTRACT = Object.freeze({
     requiredFields: ["cityName"],
     adapterFunctionNames: ["chooseUkrposhtaBranch"],
   }),
+
+  // Тестові замовлення з іншими способами доставки (07427, Power Pro): поштомат,
+  // кур'єр тощо — окреме замовлення на кожен спосіб. Лише stage.
+  deliveryOptionsCheckout: Object.freeze({
+    configKey: "deliveryOptionsCheckoutScenario",
+    contractSection: "§12",
+    requiredFields: ["deliveryOptions"],
+    adapterFunctionNames: ["chooseDeliveryOption"],
+  }),
+
+  // Замовлення з особистого кабінету (07427, Power Pro): контакти сайт бере з
+  // профілю, замовлення видно в кабінеті. Лише stage.
+  customerAccountOrder: Object.freeze({
+    configKey: "customerAccountOrderScenario",
+    contractSection: "§13",
+    requiredFields: ["productName"],
+    adapterFunctionNames: [
+      "placeOrderFromCustomerAccount",
+      "expectAccountOrderContactsFromProfile",
+      "expectOrderInCustomerAccount",
+    ],
+  }),
 });
 
 // Секрети — лише з env раннера, ніколи з конфігу сайту (§3 контракту).

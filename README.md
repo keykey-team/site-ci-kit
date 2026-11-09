@@ -220,6 +220,9 @@ Require status checks to pass before merging → найти и отметить 
 | Правка цены и остатка в админке видна на сайте за 60 с; при остатке 0 товар не купить | `adminCatalogEdit.spec.mjs` | `@regression` | stage | блок `adminCatalogEditScenario` (§8), секреты админа, `E2E_TEST_ORDER_TOKEN` |
 | Путь каталог → заказ на iPhone (WebKit): страницы не шире экрана, кнопки нажимаются | `mobileCheckout.spec.mjs` | `@regression @mobile` | stage | блок `mobileCheckoutScenario` (§9), `browsers: chromium webkit` |
 | Онлайн-оплата тестовой картой со скидкой: заказ оплачен, сумма одна на оформлении, в счёте банка, на странице «спасибо» и в базе | `onlinePayment.spec.mjs` | `@regression` | stage с тестовым токеном банка | блок `onlinePaymentScenario` (§10), секреты покупателя, `E2E_TEST_ORDER_TOKEN` |
+| Гость: заказ с доставкой Укрпоштой, заказ в базе с той же суммой и способом доставки | `ukrposhtaCheckout.spec.mjs` | `@smoke` | stage | блок `ukrposhtaCheckoutScenario` (§11), `E2E_TEST_ORDER_TOKEN` |
+| Тестовый заказ с каждым другим способом доставки (поштомат, курьер…): помечен `isTest`, сумма, товар и способ доставки в базе как выбраны | `deliveryOptionsCheckout.spec.mjs` | `@smoke` | stage | блок `deliveryOptionsCheckoutScenario` (§12), `E2E_TEST_ORDER_TOKEN` |
+| Заказ из личного кабинета: имя, фамилия и телефон — из профиля, заказ виден в кабинете | `customerAccountOrder.spec.mjs` | `@smoke` | stage | блок `customerAccountOrderScenario` (§13), секреты покупателя |
 
 - В тестах нет URL и данных сайта — только из `site.config.mjs` и `site.adapter.mjs`.
 - Ответы API Новой почты в браузере подменяются данными из `site.config.mjs`
@@ -302,7 +305,7 @@ npx playwright test
 
 ## Версии
 
-- Сайты ссылаются на точный тег: `uses: keykey-team/site-ci-kit/.github/workflows/ci.yml@v3.1.0`
+- Сайты ссылаются на точный тег: `uses: keykey-team/site-ci-kit/.github/workflows/ci.yml@v3.2.0`
   и `kit-ref` той же версии в `smoke.yml` (версия сценариев). Мажорный `v2`
   остался у сайтов, которые ещё на нём.
 - `v2` (06641): тестовый заказ на проде, проверки суммы корзины, заказа в базе,
@@ -355,6 +358,11 @@ npx playwright test
   раннер для `plan` и `record`. Деплой ставит туда свой раннер: 05.11.2026 деплой
   Травницы ждал ~4 мин, пока раннеры проверок были заняты CI другой ветки. Без
   input — как раньше.
+- `v3.2.0` (07427, Power Pro): два необязательных сценария smoke stage —
+  тестовые заказы с другими способами доставки (`deliveryOptionsCheckoutScenario`,
+  §12 контракта) и заказ из личного кабинета с контактами из профиля
+  (`customerAccountOrderScenario`, §13). Сайты без этих блоков ничего не меняют:
+  тесты пропускаются.
 - Несовместимые (новое обязательное поле конфига, новая функция адаптера, смена
   имён джобов или проверок) — следующий мажорный тег (`v3`); сайты переходят на
   него сами, обновив `e2e/`, `@v3` и `kit-ref: v3`.
