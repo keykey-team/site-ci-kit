@@ -12,7 +12,12 @@ import {
   PAYMENT_CONFIRMATION_POLL_INTERVALS_MS,
   PAYMENT_CONFIRMATION_TIMEOUT_MS,
 } from "../config/regressionScenarios.config.mjs";
-import { findPaymentProviderPayPage, SUPPORTED_PAYMENT_PROVIDER_NAMES } from "../lib/paymentProviders.mjs";
+import {
+  findPaymentProviderPayPage,
+  SITE_PAYMENT_ADAPTER_FUNCTION_NAMES,
+  SITE_PAYMENT_PROVIDER_NAME,
+  SUPPORTED_PAYMENT_PROVIDER_NAMES,
+} from "../lib/paymentProviders.mjs";
 import { readStoredOrder } from "../lib/siteApi.mjs";
 
 test("оплата тестовой картой со скидкой: заказ оплачен, сумма везде одна @regression", async ({
@@ -23,13 +28,15 @@ test("оплата тестовой картой со скидкой: заказ
   onlinePaymentScenario,
   customerCredentials,
   testOrderToken,
+  buyer,
 }) => {
   test.setTimeout(ONLINE_PAYMENT_TEST_TIMEOUT_MS);
   const { paymentProvider, expectedDiscountUah } = onlinePaymentScenario;
-  const payPage = findPaymentProviderPayPage(paymentProvider);
+  const payPage = findPaymentProviderPayPage(paymentProvider, siteAdapter);
   test.skip(
     !payPage,
-    `onlinePaymentScenario.paymentProvider = «${paymentProvider}»: библиотека умеет ${SUPPORTED_PAYMENT_PROVIDER_NAMES.join(", ")}`,
+    `onlinePaymentScenario.paymentProvider = «${paymentProvider}»: библиотека умеет ${SUPPORTED_PAYMENT_PROVIDER_NAMES.join(", ")}` +
+      ` (для «${SITE_PAYMENT_PROVIDER_NAME}» адаптер экспортирует ${SITE_PAYMENT_ADAPTER_FUNCTION_NAMES.join(", ")})`,
   );
 
   await test.step("войти по телефону и коду", async () => {
@@ -40,7 +47,13 @@ test("оплата тестовой картой со скидкой: заказ
   );
   await test.step("открыть оформление заказа", async () => {
     await siteAdapter.openCheckout(page);
-    await siteAdapter.expectCheckoutAutofilled(page);
+    // Сайт без автозаполнения формы (isCheckoutAutofilled: false, 07435) — покупатель вводит данные сам.
+    if (onlinePaymentScenario.isCheckoutAutofilled === false) {
+      await siteAdapter.fillGuestBuyer(page, buyer);
+      await siteAdapter.chooseNovaPoshtaBranch(page, siteConfig.novaPoshta);
+    } else {
+      await siteAdapter.expectCheckoutAutofilled(page);
+    }
   });
 
   const discountUah = await test.step("скидка применена", async () => {
