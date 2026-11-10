@@ -54,7 +54,7 @@ jobs:
       issues: write
     steps:
       - name: Release to prod
-        uses: keykey-team/site-ci-kit/.github/actions/release-to-prod@v3.2.0
+        uses: keykey-team/site-ci-kit/.github/actions/release-to-prod@v3.3.0
         with:
           release-label: ${{ inputs.release-label }}
           stage-branch: ${{ inputs.stage-branch }}
