@@ -145,8 +145,9 @@ export const OPTIONAL_SCENARIO_CONTRACT = Object.freeze({
       "seededOffer.priceUah",
       "seededOffer.stockQuantity",
       "editedOffer.priceUah",
-      "editedOffer.stockQuantity",
     ],
+    // editedOffer.stockQuantity не обов'язкове: сайт з isStockEditedInAdmin: false
+    // (залишок веде CRM) його не задає. Для решти його перевіряє сам тест.
     adapterFunctionNames: ["editProductOfferInAdmin", "readStorefrontOffer"],
   }),
 

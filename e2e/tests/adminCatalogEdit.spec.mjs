@@ -5,6 +5,11 @@
 // Лише stage. Товар — окремий у сиді (adminCatalogEditScenario сайту): smoke
 // звіряє ціну основного тестового товару, тож міняти її тут не можна. У кінці
 // тест повертає товар до стану сида.
+//
+// Сайт, де залишок у картці товару лише для читання (його веде CRM — Sana з
+// 07694), ставить isStockEditedInAdmin: false. Тоді тест міняє тільки ціну і
+// перевіряє, що залишок від цього не зсунувся; крок «залишок 0» пропускається —
+// виставити 0 з адмінки там неможливо.
 import { expect, test } from "../lib/fixtures.mjs";
 import {
   ADMIN_EDIT_POLL_INTERVALS_MS,
@@ -17,7 +22,7 @@ import { readStockQuantity } from "../lib/siteApi.mjs";
 const MILLISECONDS_IN_SECOND = 1_000;
 const PROPAGATION_LIMIT_SECONDS = ADMIN_EDIT_PROPAGATION_TIMEOUT_MS / MILLISECONDS_IN_SECOND;
 
-test(`правка цены и остатка в админке видна на сайте за ${PROPAGATION_LIMIT_SECONDS} с; при остатке 0 товар не купить @regression`, async ({
+test(`правка цены (и остатка, если его правят в админке) видна на сайте за ${PROPAGATION_LIMIT_SECONDS} с; при остатке 0 товар не купить @regression`, async ({
   page: adminPage,
   anonymousBuyerPage,
   request,
@@ -29,18 +34,27 @@ test(`правка цены и остатка в админке видна на 
 }) => {
   test.setTimeout(ADMIN_EDIT_TEST_TIMEOUT_MS);
   const { productPath, adminProductKey, optionLabel, sku, seededOffer, editedOffer } = adminCatalogEditScenario;
+  // Без поля — як до v3.4.0: залишок правлять в адмінці.
+  const isStockEditedInAdmin = adminCatalogEditScenario.isStockEditedInAdmin !== false;
   expect(editedOffer.priceUah, "новая цена должна отличаться от цены сида (данные сайта)").not.toBe(seededOffer.priceUah);
-  expect(editedOffer.stockQuantity, "новый остаток должен быть больше 0 (данные сайта)").toBeGreaterThan(
-    SOLD_OUT_STOCK_QUANTITY,
-  );
+  if (isStockEditedInAdmin) {
+    expect(editedOffer.stockQuantity, "новый остаток должен быть больше 0 (данные сайта)").toBeGreaterThan(
+      SOLD_OUT_STOCK_QUANTITY,
+    );
+  }
 
   const readStorefrontOffer = () => siteAdapter.readStorefrontOffer(anonymousBuyerPage, { productPath, optionLabel });
   const readStorefrontStockQuantity = () => readStockQuantity(request, siteConfig, { sku, testOrderToken });
+  const stockMismatchMessage = isStockEditedInAdmin
+    ? `остаток не обновился за ${PROPAGATION_LIMIT_SECONDS} с`
+    : `остаток не равен остатку сида ${seededOffer.stockQuantity}, хотя в админке меняли только цену`;
 
   // Правка в панелі, потім вітрина й залишок — доки не стануть очікуваними,
   // але не довше хвилини. Скільки це зайняло — в анотації звіту.
   async function saveOfferAndExpectOnStorefront({ priceUah, stockQuantity, isPurchasable }) {
-    await siteAdapter.editProductOfferInAdmin(adminPage, { adminProductKey, optionLabel, priceUah, stockQuantity });
+    const expectedStockQuantity = isStockEditedInAdmin ? stockQuantity : seededOffer.stockQuantity;
+    const offerEdit = isStockEditedInAdmin ? { priceUah, stockQuantity } : { priceUah };
+    await siteAdapter.editProductOfferInAdmin(adminPage, { adminProductKey, optionLabel, ...offerEdit });
     const savedAtMs = Date.now();
 
     await expect
@@ -53,20 +67,23 @@ test(`правка цены и остатка в админке видна на 
       .toMatchObject(isPurchasable ? { isPurchasable, priceUah } : { isPurchasable });
     await expect
       .poll(readStorefrontStockQuantity, {
-        message: `остаток не обновился за ${PROPAGATION_LIMIT_SECONDS} с`,
+        message: stockMismatchMessage,
         timeout: ADMIN_EDIT_PROPAGATION_TIMEOUT_MS,
         intervals: ADMIN_EDIT_POLL_INTERVALS_MS,
       })
-      .toBe(stockQuantity);
+      .toBe(expectedStockQuantity);
 
     const propagationSeconds = Math.round((Date.now() - savedAtMs) / MILLISECONDS_IN_SECOND);
     test.info().annotations.push({
       type: "propagation",
-      description: `цена ${priceUah}, остаток ${stockQuantity}: на сайте через ${propagationSeconds} с`,
+      description: `цена ${priceUah}, остаток ${expectedStockQuantity}: на сайте через ${propagationSeconds} с`,
     });
   }
 
   const seededStorefrontState = { ...seededOffer, isPurchasable: true };
+  const editedOfferStepTitle = isStockEditedInAdmin
+    ? `новая цена ${editedOffer.priceUah} и остаток ${editedOffer.stockQuantity} видны на сайте`
+    : `новая цена ${editedOffer.priceUah} видна на сайте, остаток ${seededOffer.stockQuantity} не сдвинулся`;
 
   await test.step("войти в админку", async () => {
     await siteAdapter.loginAdmin(adminPage, adminCredentials);
@@ -80,11 +97,12 @@ test(`правка цены и остатка в админке видна на 
     if (!isSeededState) await saveOfferAndExpectOnStorefront(seededStorefrontState);
   });
 
-  await test.step(`новая цена ${editedOffer.priceUah} и остаток ${editedOffer.stockQuantity} видны на сайте`, async () => {
+  await test.step(editedOfferStepTitle, async () => {
     await saveOfferAndExpectOnStorefront({ ...editedOffer, isPurchasable: true });
   });
 
-  await test.step("остаток 0 — купить товар нельзя", async () => {
+  await test.step("остаток 0 — купить товар нельзя", async (step) => {
+    step.skip(!isStockEditedInAdmin, "остаток на сайте ведёт CRM, в админке он только для чтения");
     await saveOfferAndExpectOnStorefront({
       priceUah: editedOffer.priceUah,
       stockQuantity: SOLD_OUT_STOCK_QUANTITY,

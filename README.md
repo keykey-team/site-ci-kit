@@ -217,7 +217,7 @@ Require status checks to pass before merging → найти и отметить 
 | Товар из отфильтрованного каталога открыт на выбранном размере; выбор размера меняет цену и артикул, распроданный размер недоступен | `catalogProductSize.spec.mjs` | `@regression` | stage | блок `catalogScenario` |
 | Каталог без товаров показывает сообщение, сброс фильтров возвращает список | `catalogEmptyResult.spec.mjs` | `@regression` | stage | блок `catalogScenario` |
 | Два варианта одного товара в корзине: две позиции, у каждой свои размер и фото, сумма — сумма двух цен | `cartVariants.spec.mjs` | `@regression` | stage | блок `cartVariantsScenario` (§7) |
-| Правка цены и остатка в админке видна на сайте за 60 с; при остатке 0 товар не купить | `adminCatalogEdit.spec.mjs` | `@regression` | stage | блок `adminCatalogEditScenario` (§8), секреты админа, `E2E_TEST_ORDER_TOKEN` |
+| Правка цены и остатка в админке видна на сайте за 60 с; при остатке 0 товар не купить (остаток из CRM — `isStockEditedInAdmin: false`: только цена) | `adminCatalogEdit.spec.mjs` | `@regression` | stage | блок `adminCatalogEditScenario` (§8), секреты админа, `E2E_TEST_ORDER_TOKEN` |
 | Путь каталог → заказ на iPhone (WebKit): страницы не шире экрана, кнопки нажимаются | `mobileCheckout.spec.mjs` | `@regression @mobile` | stage | блок `mobileCheckoutScenario` (§9), `browsers: chromium webkit` |
 | Онлайн-оплата тестовой картой со скидкой: заказ оплачен, сумма одна на оформлении, в счёте банка, на странице «спасибо» и в базе | `onlinePayment.spec.mjs` | `@regression` | stage с тестовым токеном банка | блок `onlinePaymentScenario` (§10), секреты покупателя, `E2E_TEST_ORDER_TOKEN` |
 | Гость: заказ с доставкой Укрпоштой, заказ в базе с той же суммой и способом доставки | `ukrposhtaCheckout.spec.mjs` | `@smoke` | stage | блок `ukrposhtaCheckoutScenario` (§11), `E2E_TEST_ORDER_TOKEN` |
@@ -366,6 +366,10 @@ npx playwright test
 - `v3.3.0` (07435, Power Pro): онлайн-оплата (§10) — провайдер `"site"` (шаги «банка»
   выполняет адаптер сайта: у сайта нет тестового мерчанта) и поле `isCheckoutAutofilled: false`
   (форма без автозаполнения — тест заполняет её сам). Сайты с monobank и LiqPay ничего не меняют.
+- `v3.4.0` (07694, Sana): правки из админки (§8) — поле `isStockEditedInAdmin: false` для
+  сайта, где остаток в карточке товара только для чтения (его ведёт CRM): тест меняет только
+  цену, проверяет, что остаток не сдвинулся, и пропускает шаг «остаток 0»;
+  `editedOffer.stockQuantity` тогда не нужен. Без поля — как раньше.
 - Несовместимые (новое обязательное поле конфига, новая функция адаптера, смена
   имён джобов или проверок) — следующий мажорный тег (`v3`); сайты переходят на
   него сами, обновив `e2e/`, `@v3` и `kit-ref: v3`.
