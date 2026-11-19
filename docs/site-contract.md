@@ -384,6 +384,12 @@ cartVariantsScenario: {
 проверяет, что покупатель видит новые значения не позже чем через 60 секунд, а
 товар с остатком 0 купить нельзя. В конце возвращает товар к состоянию сида.
 
+Если остаток в карточке товара только для чтения (его ведёт CRM, как у Sana с
+07694), сайт ставит `isStockEditedInAdmin: false` (с v3.4.0). Тогда тест меняет
+только цену, проверяет, что остаток остался `seededOffer.stockQuantity`, а шаг
+«остаток 0» пропускает — в отчёте он помечен пропущенным. `editedOffer.stockQuantity`
+в этом режиме не нужен. Без поля — как раньше: остаток правится в админке.
+
 ```js
 // site.config.mjs
 adminCatalogEditScenario: {
@@ -397,12 +403,15 @@ adminCatalogEditScenario: {
   // Состояние сида и значения, на которые тест его меняет.
   seededOffer: { priceUah: 1000, stockQuantity: 5 },
   editedOffer: { priceUah: 1111, stockQuantity: 2 },
+  // Необязательно (v3.4.0): false — остаток в админке не правится, тест меняет
+  // только цену; editedOffer.stockQuantity тогда не нужен.
+  isStockEditedInAdmin: true,
 },
 ```
 
 | Функция адаптера | Что делает на сайте |
 |---|---|
-| `editProductOfferInAdmin(page, { adminProductKey, optionLabel, priceUah, stockQuantity })` | (Админ уже вошёл — `loginAdmin`) открывает товар в админке, ставит варианту цену и остаток, сохраняет и дожидается подтверждения. Отказ админки — ошибка с её текстом. |
+| `editProductOfferInAdmin(page, { adminProductKey, optionLabel, priceUah, stockQuantity })` | (Админ уже вошёл — `loginAdmin`) открывает товар в админке, ставит варианту цену и остаток, сохраняет и дожидается подтверждения. Отказ админки — ошибка с её текстом. При `isStockEditedInAdmin: false` `stockQuantity` не передаётся — меняется только цена. |
 | `readStorefrontOffer(page, { productPath, optionLabel })` | Открывает страницу товара заново и **возвращает** `{ isPurchasable, priceUah }`: можно ли купить этот вариант и за сколько. Вариант не предлагается или кнопка покупки недоступна — `isPurchasable: false` (цена тогда не сверяется). |
 
 Витрину тест смотрит отдельным браузерным контекстом без входа — как сторонний
